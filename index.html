@@ -1,14 +1,5 @@
 <!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<title>Arena Zero</title>
-<style>:root{color-scheme:dark}html,body{margin:0}[hidden]{display:none!important}</style>
-</head>
-<body>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><title>Arena Zero</title><style>:root{color-scheme:dark}html,body{margin:0}[hidden]{display:none!important}</style></head><body>
 
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
 <style>
@@ -113,6 +104,25 @@ input[type=text]:disabled{opacity:.5}
 .room .row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
 .room .btn{width:auto;padding:9px 14px;font-size:13px}
 #banner{position:absolute;left:50%;top:30%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);padding:12px 22px;background:var(--panel);border:1px solid var(--accent);border-radius:2px;font-size:20px;font-weight:700;letter-spacing:.04em;text-align:center}
+/* weapons / loadout */
+select{width:100%;box-sizing:border-box;min-width:0;padding:9px 8px;border:1px solid var(--line);border-radius:2px;background:rgba(255,255,255,.06);color:var(--fg);font-family:var(--font-body);font-size:14px}
+select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+option{background:#0b0f15;color:#e8edf2}
+.loadout{margin:0 0 14px;display:grid;gap:8px}
+.lo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.lo-grid label{display:flex;flex-direction:column;gap:4px;min-width:0}
+.lo-grid label span{font-size:11px;letter-spacing:.12em;color:var(--muted);font-weight:600}
+.lo-desc{margin:0;color:var(--muted);font-size:12.5px;line-height:1.5;min-height:3em}
+.lo-note{margin:0;color:var(--muted);font-size:12px}
+.slots{display:flex;gap:6px}
+.slots span{min-width:22px;padding:2px 6px;border:1px solid var(--line);border-radius:2px;font-size:12px;font-weight:700;text-align:center;color:var(--muted)}
+.slots span.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+#scope{position:absolute;inset:0;background:radial-gradient(circle at center,rgba(0,0,0,0) 0,rgba(0,0,0,0) 27vmin,rgba(0,0,0,.95) 27.4vmin)}
+#scope::before,#scope::after{content:"";position:absolute;background:rgba(0,0,0,.8)}
+#scope::before{left:0;right:0;top:50%;height:1px}
+#scope::after{top:0;bottom:0;left:50%;width:1px}
+.t-weapon{width:66px;height:66px;right:calc(max(28px,env(safe-area-inset-right,0px)) + 192px);bottom:max(40px,env(safe-area-inset-bottom,0px));font-size:11px;text-align:center;line-height:1.15}
+.t-scope{width:56px;height:56px;right:calc(max(28px,env(safe-area-inset-right,0px)) + 116px);bottom:calc(max(40px,env(safe-area-inset-bottom,0px)) + 76px);font-size:12px}
 /* touch controls */
 #touch{position:absolute;inset:0;touch-action:none;-webkit-touch-callout:none;font-family:var(--font-display)}
 #stick{position:absolute;width:128px;height:128px;margin:-64px 0 0 -64px;border:2px solid rgba(255,255,255,.28);border-radius:50%;background:rgba(255,255,255,.05);pointer-events:none;opacity:.55}
@@ -152,6 +162,7 @@ input[type=text]:disabled{opacity:.5}
       <div class="kv"><span id="botslabel">생존 봇</span><b id="bots">6</b></div>
     </div>
     <div id="feed"></div>
+    <div id="scope" hidden></div>
     <div id="crosshair"><i></i><i></i><i></i><i></i></div>
     <div id="hitmark"></div>
     <div id="dmg"></div>
@@ -164,7 +175,8 @@ input[type=text]:disabled{opacity:.5}
     <div class="hud-br">
       <div class="label" id="reloadlabel" hidden>재장전 중</div>
       <div class="label" id="ammolabel">탄약</div>
-      <div class="ammo"><b id="ammo">30</b><span>/ 30</span></div>
+      <div class="ammo"><b id="ammo">30</b><span id="magmax">/ 30</span></div>
+      <div class="slots" id="slots"><span>1</span><span>2</span><span>3</span></div>
     </div>
     <div id="board" hidden>
       <div class="label">점수판</div>
@@ -177,6 +189,8 @@ input[type=text]:disabled{opacity:.5}
     <div class="tbtn t-fire" data-btn="fire">발사</div>
     <div class="tbtn t-jump" data-btn="jump">점프</div>
     <div class="tbtn t-reload" data-btn="reload">장전</div>
+    <div class="tbtn t-weapon" data-btn="weapon" id="weapon-btn">무기</div>
+    <div class="tbtn t-scope" data-btn="scope" id="scope-btn" hidden>조준</div>
     <div class="tbtn t-score" data-btn="score">점수</div>
     <div class="tbtn t-pause" data-btn="pause">II</div>
   </div>
@@ -186,11 +200,23 @@ input[type=text]:disabled{opacity:.5}
 
   <div id="menu" class="overlay">
     <div class="panel">
-      <p class="eyebrow">프로토타입 v0.2</p>
+      <p class="eyebrow">프로토타입 v0.3</p>
       <h1 id="menu-title">Arena Zero</h1>
       <p id="menu-sub" class="sub">봇과 연습하거나, 방을 만들어 친구와 온라인으로 대전하세요. 먼저 킬 목표를 채우면 승리합니다.</p>
       <div id="home-box">
         <label class="field"><span class="label">이름</span><input id="name" type="text" maxlength="12" autocomplete="off" spellcheck="false"></label>
+        <div id="lo-slot-home">
+          <div id="loadout" class="loadout">
+            <span class="label">장비</span>
+            <div class="lo-grid">
+              <label><span>권총</span><select id="lo-p"></select></label>
+              <label><span>근접</span><select id="lo-m"></select></label>
+              <label><span>주무기</span><select id="lo-r"></select></label>
+            </div>
+            <p id="lo-desc" class="lo-desc"></p>
+            <p id="lo-note" class="lo-note" hidden>바꾼 장비는 다음에 투입될 때 적용됩니다.</p>
+          </div>
+        </div>
         <button id="start" class="btn" type="button">봇과 연습하기</button>
         <div class="divider"><span class="label">온라인 대전</span></div>
         <div class="stack">
@@ -203,6 +229,7 @@ input[type=text]:disabled{opacity:.5}
         <p id="net-status" class="status" hidden></p>
       </div>
       <div id="pause-box" hidden>
+        <div id="lo-slot-pause"></div>
         <div id="room-info" class="room" hidden>
           <span class="label">방 코드</span>
           <div class="code" id="room-code">-----</div>
@@ -221,6 +248,9 @@ input[type=text]:disabled{opacity:.5}
         <dt><kbd>R</kbd></dt><dd>재장전</dd>
         <dt><kbd>Tab</kbd></dt><dd>점수판 (누르는 동안)</dd>
         <dt><kbd>M</kbd></dt><dd>소리 끄기 / 켜기</dd>
+        <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt><dd>권총 / 근접 / 주무기 선택 (휠로도 전환)</dd>
+        <dt><kbd>Q</kbd></dt><dd>직전 무기로 전환</dd>
+        <dt><kbd>우클릭</kbd></dt><dd>저격총 확대 (누르는 동안)</dd>
         <dt><kbd>Esc</kbd></dt><dd>일시정지</dd>
       </dl>
       <dl class="keys" id="keys-touch" hidden>
@@ -229,6 +259,8 @@ input[type=text]:disabled{opacity:.5}
         <dt><kbd>발사</kbd></dt><dd>누르고 있으면 연사, 누른 채 움직이면 조준</dd>
         <dt><kbd>점프</kbd> <kbd>장전</kbd></dt><dd>점프와 재장전</dd>
         <dt><kbd>점수</kbd> <kbd>II</kbd></dt><dd>점수판(누르는 동안), 일시정지</dd>
+        <dt><kbd>무기</kbd> <kbd>조준</kbd></dt><dd>무기 전환(권총 → 근접 → 주무기), 저격총 확대</dd>
+        <dt><kbd>자동 조준</kbd></dt><dd>적이 가까이 조준선 근처에 있으면 시점이 살짝 끌려가요</dd>
       </dl>
       <p id="menu-note" class="note">온라인은 방 코드를 아는 사람끼리 직접 연결됩니다(최대 6명). 방을 만든 사람이 창을 닫으면 대전이 끝나요. PC는 키보드와 마우스, 모바일은 화면 터치로 조작합니다. 모바일은 가로 모드를 권장해요.</p>
     </div>
@@ -363,25 +395,85 @@ function groundAt(x,z,footY){
   return g;
 }
 
+/* ---------- weapons ---------- */
+// slot 0 = sidearm, 1 = melee, 2 = primary. dmg is per hit (per pellet for shotguns), head = head multiplier.
+var WEAPONS={
+  pistol:  {name:'권총',     slot:0,dmg:22,head:2.2,mag:15,rate:0.18,reload:1.3,auto:false,spread:0.005,move:0.008,recoil:0.8,kick:0.011,snd:[0.8,1.0],desc:'가볍고 정확한 기본 권총.'},
+  revolver:{name:'리볼버',   slot:0,dmg:55,head:2.1,mag:6, rate:0.6, reload:2.2,auto:false,spread:0.004,move:0.01, recoil:1.6,kick:0.03, snd:[1.2,0.75],desc:'느리지만 한 방이 묵직해요. 머리에 맞으면 즉사.'},
+  mpistol: {name:'기관권총', slot:0,dmg:12,head:1.8,mag:24,rate:0.07,reload:1.6,auto:true, spread:0.014,move:0.012,recoil:0.6,kick:0.006,snd:[0.7,1.25],desc:'연사가 빠르지만 흔들림이 큰 소형 자동화기.'},
+  knife:   {name:'단검',     slot:1,kind:'melee',dmg:42,head:1.3,rate:0.38,range:2.3,speed:1.12,swingT:0.22,desc:'이동이 빨라지는 단검. 세 번이면 쓰러뜨려요.'},
+  axe:     {name:'도끼',     slot:1,kind:'melee',dmg:75,head:1.3,rate:0.8, range:2.5,speed:1.0, swingT:0.34,desc:'느리지만 두 번이면 쓰러지는 도끼.'},
+  ar:      {name:'돌격소총', slot:2,dmg:22,head:2.2,mag:30,rate:0.095,reload:2.1,auto:true, spread:0.004,move:0.007,heat:0.06,heatSpread:0.012,recoil:1,  kick:0.006,snd:[1,0.9],desc:'균형 잡힌 기본 소총.'},
+  smg:     {name:'기관단총', slot:2,dmg:15,head:1.8,mag:35,rate:0.065,reload:1.7,auto:true, spread:0.01, move:0.006,heat:0.05,heatSpread:0.01, speed:1.06,recoil:0.7,kick:0.005,snd:[0.8,1.2],desc:'움직이며 쏘기 좋은 빠른 연사.'},
+  shotgun: {name:'산탄총',   slot:2,dmg:12,head:1.5,mag:6, rate:0.85,reload:2.6,auto:false,spread:0,    move:0,    pellets:8,cone:0.045,falloff:22,recoil:2.2,kick:0.05,snd:[1.3,0.6],desc:'가까이서 쏘면 압도적, 멀수록 약해져요.'},
+  sniper:  {name:'저격총',   slot:2,dmg:80,head:2.4,mag:5, rate:1.15,reload:2.8,auto:false,spread:0.03, move:0.03, adsMul:0.03,zoom:24,speed:0.92,recoil:2.5,kick:0.045,snd:[1.4,0.5],tracer:0xfff2c2,desc:'확대 조준 후 쏘세요. 몸 2발, 머리 1발.'},
+  lmg:     {name:'경기관총', slot:2,dmg:19,head:2,  mag:60,rate:0.085,reload:4,  auto:true, spread:0.007,move:0.012,heat:0.05,heatSpread:0.022,speed:0.9,recoil:1.1,kick:0.007,snd:[1.1,0.8],desc:'탄이 넉넉하지만 이동이 느려요.'}
+};
+Object.keys(WEAPONS).forEach(function(k){
+  var w=WEAPONS[k];
+  w.id=k; w.kind=w.kind||'gun';
+  var d={head:2.2,move:0.008,adsMul:1,speed:1,recoil:1,kick:0.006,heat:0,heatSpread:0,pellets:1,range:120,snd:[1,0.9],tracer:0xffd27a,mag:0,reload:1.5,rate:0.2};
+  Object.keys(d).forEach(function(p){if(w[p]===undefined) w[p]=d[p]});
+});
+// viewmodel parts: [w,h,d, x,y,z, color]; muz = muzzle flash position; rot = extra rotation of the whole model
+var VM={
+  pistol:  {parts:[[.06,.1,.22,0,0,-.08,0x2a313d],[.05,.055,.3,0,.04,-.13,0x1b2028]],muz:[0,.045,-.3]},
+  revolver:{parts:[[.06,.11,.2,0,0,-.06,0x3a3f4a],[.04,.04,.32,0,.035,-.28,0x1b2028],[.075,.075,.11,0,.02,-.12,0x59606e]],muz:[0,.04,-.45]},
+  mpistol: {parts:[[.07,.1,.28,0,0,-.1,0x2a313d],[.04,.16,.05,0,-.12,-.1,0x1b2028],[.05,.05,.1,0,.01,-.27,0x1b2028]],muz:[0,.02,-.34]},
+  knife:   {parts:[[.02,.07,.3,0,.02,-.22,0xc3ccd8],[.03,.045,.13,0,-.01,-.03,0x2a313d]],rot:[-.35,0,0]},
+  axe:     {parts:[[.035,.035,.5,0,0,-.2,0x6b4f33],[.03,.15,.14,0,.07,-.44,0xc3ccd8]],rot:[-.35,0,0]},
+  ar:      {parts:[[.08,.1,.55,0,0,0,0x2a313d],[.05,.05,.25,0,.015,-.38,0x1b2028],[.085,.02,.2,0,.06,-.05,0xff6a3d],[.05,.14,.06,0,-.11,-.05,0x1b2028]],muz:[0,.015,-.56]},
+  smg:     {parts:[[.07,.09,.38,0,0,-.02,0x2a313d],[.04,.18,.05,0,-.13,-.06,0x1b2028],[.04,.04,.15,0,.01,-.28,0x1b2028]],muz:[0,.01,-.38]},
+  shotgun: {parts:[[.08,.09,.45,0,0,0,0x5a4632],[.06,.06,.5,0,.02,-.38,0x1b2028],[.1,.07,.18,0,-.035,-.3,0x3a2f22]],muz:[0,.02,-.65]},
+  sniper:  {parts:[[.07,.09,.7,0,0,0,0x2f3a2a],[.035,.035,.5,0,.012,-.58,0x1b2028],[.045,.045,.28,0,.085,-.15,0x1b2028]],muz:[0,.012,-.84]},
+  lmg:     {parts:[[.09,.12,.65,0,0,0,0x2a313d],[.05,.05,.35,0,.02,-.48,0x1b2028],[.13,.12,.12,0,-.12,-.02,0x3a3f4a],[.09,.02,.25,0,.07,-.05,0xff6a3d]],muz:[0,.02,-.66]}
+};
+var loadout={p:'pistol',m:'knife',r:'ar'};
+try{
+  var savedLo=JSON.parse(localStorage.getItem('azero-loadout')||'null');
+  if(savedLo&&WEAPONS[savedLo.p]&&WEAPONS[savedLo.p].slot===0) loadout.p=savedLo.p;
+  if(savedLo&&WEAPONS[savedLo.m]&&WEAPONS[savedLo.m].slot===1) loadout.m=savedLo.m;
+  if(savedLo&&WEAPONS[savedLo.r]&&WEAPONS[savedLo.r].slot===2) loadout.r=savedLo.r;
+}catch(e){}
+
 /* ---------- player ---------- */
-var player={pos:new T.Vector3(0,EYE,30),vel:new T.Vector3(),yaw:0,pitch:0,hp:100,alive:false,kills:0,deaths:0,ammo:MAG,reloading:0,fireCd:0,lastHit:-99,onGround:true,recoil:0,respawn:0,invuln:0,dmgFlash:0,roll:0};
+var player={pos:new T.Vector3(0,EYE,30),vel:new T.Vector3(),yaw:0,pitch:0,hp:100,alive:false,kills:0,deaths:0,inv:null,cur:2,last:0,equip:0,swing:0,heat:0,zoomed:false,zoomToggle:false,reloading:0,fireCd:0,lastHit:-99,onGround:true,recoil:0,respawn:0,invuln:0,dmgFlash:0,roll:0};
+// player.ammo always means "ammo of the weapon in hand"
+Object.defineProperty(player,'ammo',{get:function(){return this.inv[this.cur].ammo},set:function(v){this.inv[this.cur].ammo=v},enumerable:true});
 var bobT=0;
 
-/* weapon viewmodel */
+/* weapon viewmodel: one container on the camera, the model inside is swapped per weapon */
 var weapon=new T.Group();
-var wBody=new T.Mesh(new T.BoxGeometry(0.08,0.1,0.55),new T.MeshLambertMaterial({color:0x2a313d}));
-var wBarrel=new T.Mesh(new T.BoxGeometry(0.05,0.05,0.25),new T.MeshLambertMaterial({color:0x1b2028}));
-wBarrel.position.set(0,0.015,-0.38);
-var wStripe=new T.Mesh(new T.BoxGeometry(0.085,0.02,0.2),new T.MeshBasicMaterial({color:0xff6a3d}));
-wStripe.position.set(0,0.06,-0.05);
+var vmGroup=null, muzzleT=0;
 var muzzle=new T.Mesh(new T.SphereGeometry(0.07,8,8),new T.MeshBasicMaterial({color:0xffd27a}));
-muzzle.position.set(0,0.015,-0.56);
 muzzle.visible=false;
-weapon.add(wBody,wBarrel,wStripe,muzzle);
+weapon.add(muzzle);
 weapon.position.set(0.22,-0.2,-0.45);
 weapon.visible=false;
 camera.add(weapon);
-var muzzleT=0;
+function buildVM(){
+  var def=WEAPONS[player.inv[player.cur].id], vm=VM[def.id];
+  if(vmGroup) weapon.remove(vmGroup);
+  vmGroup=new T.Group();
+  vm.parts.forEach(function(p){
+    var m=new T.Mesh(new T.BoxGeometry(p[0],p[1],p[2]),new T.MeshLambertMaterial({color:p[6]}));
+    m.position.set(p[3],p[4],p[5]);
+    vmGroup.add(m);
+  });
+  if(vm.rot) vmGroup.rotation.set(vm.rot[0],vm.rot[1],vm.rot[2]);
+  if(vm.muz) muzzle.position.set(vm.muz[0],vm.muz[1],vm.muz[2]);
+  muzzle.visible=false; muzzleT=0;
+  weapon.add(vmGroup);
+}
+function makeInv(){return [loadout.p,loadout.m,loadout.r].map(function(id){return {id:id,ammo:WEAPONS[id].mag||0}})}
+// called on every (re)spawn: full magazines, primary weapon in hand
+function equipLoadout(){
+  player.inv=makeInv();
+  player.cur=2; player.last=0; player.equip=0.4; player.swing=0; player.heat=0;
+  player.reloading=0; player.zoomToggle=false; player.zoomed=false;
+  buildVM();
+}
+equipLoadout();
 
 /* ---------- bots ---------- */
 var bots=[];
@@ -435,7 +527,7 @@ function spawnPlayer(sx,sz,syaw){
   player.vel.set(0,0,0);
   player.yaw=syaw;
   player.pitch=0; player.roll=0;
-  player.hp=100; player.alive=true; player.ammo=MAG; player.reloading=0; player.invuln=online?0:2; player.onGround=true; player.spawned=true;
+  player.hp=100; player.alive=true; player.reloading=0; equipLoadout(); player.invuln=online?0:2; player.onGround=true; player.spawned=true;
   $('deadmsg').hidden=true;
   weapon.visible=true;
 }
@@ -529,9 +621,16 @@ function updateHud(){
   var hp=Math.max(0,Math.ceil(player.hp));
   $('hpnum').textContent=hp;
   var fill=$('hpfill'); fill.style.width=hp+'%'; fill.className=hp<35?'low':'';
-  var am=$('ammo'); am.textContent=player.ammo; am.className=player.ammo===0?'empty':'';
+  var wdef=curDef(), am=$('ammo');
+  if(wdef.kind==='melee'){am.textContent='∞';am.className='';$('magmax').textContent=''}
+  else{am.textContent=player.ammo;am.className=player.ammo===0?'empty':'';$('magmax').textContent='/ '+wdef.mag}
   var rl=player.reloading>0;
   $('reloadlabel').hidden=!rl; $('ammolabel').hidden=rl;
+  if(hudW!==wdef.id){
+    hudW=wdef.id; $('ammolabel').textContent=wdef.name; $('weapon-btn').textContent=wdef.name; $('scope-btn').hidden=!wdef.zoom;
+  }
+  if(hudCur!==player.cur){hudCur=player.cur;for(var si=0;si<slotEls.length;si++) slotEls[si].className=si===player.cur?'on':''}
+  $('scope-btn').classList.toggle('on',!!player.zoomToggle);
   dmgEl.style.opacity=player.dmgFlash;
 }
 function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -557,13 +656,13 @@ function setStatus(msg,bad){ statusEl.hidden=!msg; statusEl.textContent=msg||'';
 function showHome(title,sub){
   menuTitle.textContent=title||'Arena Zero';
   menuSub.textContent=sub||DEFAULT_SUB;
-  homeBox.hidden=false; pauseBox.hidden=true; menu.hidden=false;
+  homeBox.hidden=false; pauseBox.hidden=true; menu.hidden=false; mountLoadout(true);
 }
 function showPause(title,sub,btn){
   menuTitle.textContent=title; menuSub.textContent=sub;
   $('resume').textContent=btn||'계속하기';
   $('leave').textContent=online?'방 나가기':'메인으로';
-  homeBox.hidden=true; pauseBox.hidden=false; roomInfo.hidden=!online; menu.hidden=false;
+  homeBox.hidden=true; pauseBox.hidden=false; roomInfo.hidden=!online; menu.hidden=false; mountLoadout(false);
 }
 function myName(){
   var n=(nameEl.value||'').trim().slice(0,12);
@@ -593,7 +692,7 @@ function pause(){
 function leaveGame(title,sub){
   if(online) netLeave();
   running=false; paused=false; ended=false; firing=false; rmb=false; online=false; isHost=false; keys={};
-  weapon.visible=false; player.alive=false; player.spawned=false;
+  weapon.visible=false; player.alive=false; player.spawned=false; resetZoomNow();
   hudEl.hidden=true; boardEl.hidden=true; $('banner').hidden=true; $('deadmsg').hidden=true;
   try{document.exitPointerLock()}catch(e){}
   bots.forEach(function(b){b.respawn=0;spawnBot(b)});
@@ -602,7 +701,7 @@ function leaveGame(title,sub){
 }
 function endMatch(win){
   running=false; ended=true; firing=false; rmb=false;
-  player.alive=false; weapon.visible=false;
+  player.alive=false; weapon.visible=false; resetZoomNow();
   boardEl.hidden=true;
   try{document.exitPointerLock()}catch(e){}
   hudEl.hidden=true;
@@ -656,8 +755,8 @@ document.addEventListener('pointerlockchange',function(){
   else if(running&&!fallback) pause();
 });
 function look(dx,dy){
-  player.yaw-=dx*SENS;
-  player.pitch=clamp(player.pitch-dy*SENS,-1.45,1.45);
+  player.yaw-=dx*SENS*fovScale;
+  player.pitch=clamp(player.pitch-dy*SENS*fovScale,-1.45,1.45);
 }
 document.addEventListener('mousemove',function(e){
   if(!running||paused||!player.alive) return;
@@ -693,52 +792,83 @@ window.addEventListener('keyup',function(e){
 /* ---------- combat ---------- */
 var ray=new T.Raycaster(); ray.far=120;
 var ndc=new T.Vector2(), tmpV=new T.Vector3();
+var fireLatched=false, fovScale=1, hudW=null, hudCur=-1, slotEls=document.querySelectorAll('#slots span');
+function curDef(){return WEAPONS[player.inv[player.cur].id]}
+function calcDamage(def,zone,f){return def.dmg*(zone===1?def.head:(zone===2?0.75:1))*clamp(f,0,1)}
 function startReload(){
-  if(!player.alive||player.reloading>0||player.ammo===MAG) return;
-  player.reloading=RELOAD_TIME;
+  var def=curDef();
+  if(def.kind!=='gun'||!player.alive||player.reloading>0||player.ammo>=def.mag) return;
+  player.reloading=def.reload; player.zoomToggle=false;
   blip(220,0.08,0.05,'square');
 }
-function shoot(){
-  if(player.ammo<=0){startReload();return}
-  player.ammo--; player.fireCd=0.11; player.recoil=1; muzzleT=0.05; muzzle.visible=true;
-  playShot(1,1);
-  var moving=Math.hypot(player.vel.x,player.vel.z)>1;
-  var spread=0.004+(moving?0.006:0)+(player.onGround?0:0.02);
-  camera.updateMatrixWorld(true);
-  ndc.set((Math.random()-.5)*spread*2,(Math.random()-.5)*spread*2);
-  ray.setFromCamera(ndc,camera);
+function collectTargets(){
   var targets=solidMeshes.slice();
   if(online){
     for(var rid in remotes){var rr=remotes[rid];if(rr.alive&&rr.group.visible) targets.push(rr.body,rr.head,rr.legs)}
   }else{
     bots.forEach(function(b){if(b.alive){targets.push(b.body,b.head,b.legs)}});
   }
-  var hits=ray.intersectObjects(targets,false);
-  var from=weapon.localToWorld(new T.Vector3(0,0.015,-0.56));
-  var end;
-  if(hits.length){
-    var h=hits[0];
-    end=h.point;
-    var bot=h.object.userData.bot, rem=h.object.userData.remote;
-    if(rem&&rem.alive){
-      var rhead=!!h.object.userData.head;
-      sendHost({t:'hit',v:rem.id,d:rhead?50:(h.object===rem.legs?15:20),h:rhead?1:0});
-      showHit(rhead);
-      blip(rhead?1200:800,0.05,0.06,'square');
-      addSpark(h.point,0xff3b30);
-    }else if(bot&&bot.alive){
-      var head=!!h.object.userData.head;
-      damageBot(bot,head?50:(h.object===bot.legs?15:20),head);
-      addSpark(h.point,0xff3b30);
-    }else{
-      addSpark(h.point,0xffb35a);
-    }
+  return targets;
+}
+// one ray hit: figure out what was hit and where (body / head / legs), then apply damage
+function applyHit(h,def){
+  var o=h.object, bot=o.userData.bot, rem=o.userData.remote;
+  var zone=o.userData.head?1:(((bot&&o===bot.legs)||(rem&&o===rem.legs))?2:0);
+  var f=def.falloff?clamp(1.35-h.distance/def.falloff,0.2,1):1;
+  if(rem&&rem.alive){
+    sendHost({t:'hit',v:rem.id,w:def.id,z:zone,f:r2(f)});
+    showHit(zone===1);
+    blip(zone===1?1200:800,0.05,0.06,'square');
+    addSpark(h.point,0xff3b30);
+  }else if(bot&&bot.alive){
+    damageBot(bot,calcDamage(def,zone,f),zone===1);
+    addSpark(h.point,0xff3b30);
   }else{
-    end=ray.ray.at(100,new T.Vector3());
+    addSpark(h.point,0xffb35a);
   }
-  addTracer(from,end,0xffd27a);
-  if(online) sendHost({t:'shot',a:[r2(from.x),r2(from.y),r2(from.z)],b:[r2(end.x),r2(end.y),r2(end.z)]});
-  player.pitch+=0.006;
+}
+function fire(def){
+  if(player.ammo<=0){startReload();return}
+  player.ammo--; player.fireCd=def.rate; player.recoil=def.recoil; muzzleT=0.05; muzzle.visible=true;
+  playShot(def.snd[0],def.snd[1]);
+  player.heat=clamp(player.heat+def.heat,0,1);
+  var moving=Math.hypot(player.vel.x,player.vel.z)>1;
+  var spread=def.spread+(moving?def.move:0)+(player.onGround?0:0.02)+player.heat*def.heatSpread;
+  if(player.zoomed) spread*=def.adsMul;
+  camera.updateMatrixWorld(true);
+  var targets=collectTargets(), from=weapon.localToWorld(muzzle.position.clone()), firstEnd=null;
+  ray.far=def.range;
+  for(var i=0;i<def.pellets;i++){
+    if(def.pellets>1){var rr=Math.sqrt(Math.random())*def.cone, an=Math.random()*6.2832; ndc.set(Math.cos(an)*rr,Math.sin(an)*rr)}
+    else ndc.set((Math.random()-.5)*spread*2,(Math.random()-.5)*spread*2);
+    ray.setFromCamera(ndc,camera);
+    var hits=ray.intersectObjects(targets,false), end;
+    if(hits.length){end=hits[0].point;applyHit(hits[0],def)}
+    else end=ray.ray.at(Math.min(def.range,100),new T.Vector3());
+    addTracer(from,end,def.tracer);
+    if(i===0) firstEnd=end;
+  }
+  if(online) sendHost({t:'shot',w:def.id,a:[r2(from.x),r2(from.y),r2(from.z)],b:[r2(firstEnd.x),r2(firstEnd.y),r2(firstEnd.z)]});
+  player.pitch+=def.kick;
+  player.yaw+=(Math.random()-.5)*def.kick*0.8;
+}
+// melee: a few short rays in front of the camera, nearest thing hit counts (walls block)
+function swing(def){
+  player.fireCd=def.rate; player.swing=def.swingT; muzzle.visible=false;
+  blip(def.id==='axe'?150:380,0.08,0.05,'sawtooth');
+  camera.updateMatrixWorld(true);
+  var targets=collectTargets(), best=null, offs=[[0,0],[0.18,0],[-0.18,0],[0,-0.15],[0,0.1]];
+  ray.far=def.range;
+  for(var i=0;i<offs.length;i++){
+    ndc.set(offs[i][0],offs[i][1]); ray.setFromCamera(ndc,camera);
+    var hits=ray.intersectObjects(targets,false);
+    if(hits.length&&(!best||hits[0].distance<best.distance)) best=hits[0];
+  }
+  if(best) applyHit(best,def);
+}
+function shoot(){
+  var def=curDef();
+  if(def.kind==='melee') swing(def); else fire(def);
 }
 function damageBot(b,amt,head){
   b.hp-=amt; b.flash=0.1;
@@ -834,23 +964,40 @@ function updateBot(b,dt){
 }
 
 /* ---------- player update ---------- */
+// zoom: smooth FOV change; returns true while looking through the scope
+function updateFov(dt,wantZoom,def){
+  var tf=wantZoom?def.zoom:75;
+  if(Math.abs(camera.fov-tf)>0.05){camera.fov+=(tf-camera.fov)*Math.min(1,dt*16);camera.updateProjectionMatrix()}
+  else if(camera.fov!==tf){camera.fov=tf;camera.updateProjectionMatrix()}
+  fovScale=camera.fov/75;
+  var scoped=wantZoom&&camera.fov<45;
+  scopeEl.hidden=!scoped; crossEl.style.visibility=scoped?'hidden':'visible';
+  return scoped;
+}
+function resetZoomNow(){
+  camera.fov=75; camera.updateProjectionMatrix(); fovScale=1;
+  scopeEl.hidden=true; crossEl.style.visibility='visible';
+  player.zoomToggle=false; player.zoomed=false;
+}
 function updatePlayer(dt){
   if(!player.alive){
     player.respawn-=dt;
     player.pos.y+=(0.3-player.pos.y)*Math.min(1,dt*4);
     player.roll+=(0.7-player.roll)*Math.min(1,dt*3);
+    player.zoomToggle=false; player.zoomed=false; updateFov(dt,false,curDef());
     camera.position.copy(player.pos);
     camera.rotation.set(player.pitch,player.yaw,player.roll);
     if(player.respawn<=0) spawnPlayer();
     return;
   }
+  var def=curDef();
   var lookX=(keys.ArrowLeft?1:0)-(keys.ArrowRight?1:0), lookY=(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0);
-  player.yaw+=lookX*2.2*dt;
-  player.pitch=clamp(player.pitch+lookY*1.6*dt,-1.45,1.45);
+  player.yaw+=lookX*2.2*dt*fovScale;
+  player.pitch=clamp(player.pitch+lookY*1.6*dt*fovScale,-1.45,1.45);
 
   var fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0)+touchMove.y, str=(keys.KeyD?1:0)-(keys.KeyA?1:0)+touchMove.x;
   var sprint=((keys.ShiftLeft||keys.ShiftRight)&&fwd>0)||(touchMove.y>0.55&&Math.hypot(touchMove.x,touchMove.y)>0.9);
-  var speed=sprint?8:5.5, vx=0, vz=0;
+  var speed=(sprint?8:5.5)*def.speed*(player.zoomed?0.6:1), vx=0, vz=0;
   if(fwd||str){
     var l=Math.hypot(fwd,str), mag=Math.min(1,l), f=fwd/l, s=str/l, sy=Math.sin(player.yaw), cy=Math.cos(player.yaw);
     vx=(-sy*f+cy*s)*speed*mag; vz=(-cy*f-sy*s)*speed*mag;
@@ -869,19 +1016,38 @@ function updatePlayer(dt){
 
   if(player.invuln>0) player.invuln-=dt;
   if(player.fireCd>0) player.fireCd-=dt;
-  if(player.reloading>0){player.reloading-=dt;if(player.reloading<=0){player.reloading=0;player.ammo=MAG}}
-  else if(firing&&player.fireCd<=0&&(locked||fallback||touchUI)&&!(online&&phase==='ended')) shoot();
+  if(player.equip>0) player.equip-=dt;
+  if(player.swing>0) player.swing=Math.max(0,player.swing-dt);
+  player.heat=Math.max(0,player.heat-dt*1.2);
+  if(player.reloading>0){
+    player.reloading-=dt;
+    if(player.reloading<=0){player.reloading=0;player.ammo=def.mag}
+  }else{
+    if(def.kind==='gun'&&player.ammo<=0&&player.equip<=0) startReload();
+    var canFire=firing&&player.fireCd<=0&&player.equip<=0&&(locked||fallback||touchUI)&&!(online&&phase==='ended');
+    // semi-auto weapons need one press per shot on desktop; on touch, holding the button repeats at the weapon's rate
+    if(canFire&&(def.auto||touchUI||!fireLatched)){fireLatched=true;shoot()}
+  }
+  if(!firing) fireLatched=false;
   if(!online&&gt-player.lastHit>5&&player.hp<100) player.hp=Math.min(100,player.hp+12*dt);
   player.recoil=Math.max(0,player.recoil-dt*10);
   player.dmgFlash=Math.max(0,player.dmgFlash-dt*1.8);
+
+  var wantZoom=!!(def.zoom&&((rmb&&locked)||player.zoomToggle)&&player.reloading<=0&&player.equip<=0);
+  player.zoomed=wantZoom;
+  var scoped=updateFov(dt,wantZoom,def);
+  aimAssist(dt,def);
 
   var hs=Math.hypot(player.vel.x,player.vel.z);
   if(player.onGround&&hs>0.8) bobT+=dt*hs*1.6;
   var bob=player.onGround&&hs>0.8?Math.sin(bobT)*0.035:0;
   camera.position.set(player.pos.x,player.pos.y+bob,player.pos.z);
   camera.rotation.set(player.pitch+player.recoil*0.012,player.yaw,0);
-  weapon.position.set(0.22+(hs>0.8?Math.cos(bobT*0.5)*0.01:0),-0.2,-0.45+player.recoil*0.06);
-  weapon.rotation.x=player.reloading>0?-0.9*Math.sin(Math.PI*(1-player.reloading/RELOAD_TIME)):0;
+  var sw=(player.swing>0&&def.swingT)?Math.sin(Math.PI*(1-player.swing/def.swingT)):0;
+  weapon.visible=!scoped;
+  weapon.position.set(0.22+(hs>0.8?Math.cos(bobT*0.5)*0.01:0)-sw*0.12,-0.2-Math.min(Math.max(player.equip,0),0.35)*0.6,-0.45+player.recoil*0.06-sw*0.1);
+  weapon.rotation.x=(player.reloading>0?-0.9*Math.sin(Math.PI*(1-player.reloading/def.reload)):0)-sw*1.1;
+  weapon.rotation.z=sw*0.7;
 }
 
 /* ---------- online: WebRTC via PeerJS. The room creator relays messages and referees damage. ---------- */
@@ -979,7 +1145,7 @@ function clientHandle(m){
       if(vec3ok(m.a)&&vec3ok(m.b)){
         var a=new T.Vector3(m.a[0],m.a[1],m.a[2]), b=new T.Vector3(m.b[0],m.b[1],m.b[2]);
         addTracer(a,b,0xff7a4d);
-        playShot(clamp(1-a.distanceTo(camera.position)/45,0.08,0.7),0.9);
+        var wsn=(WEAPONS[m.w]||WEAPONS.ar).snd; playShot(clamp(1-a.distanceTo(camera.position)/45,0.08,0.7)*wsn[0],wsn[1]);
       }
       break;
     case 'kill':
@@ -1031,7 +1197,7 @@ function hostSpawn(id){
 function hostDamage(vid,aid,dmg,head){
   var v=hostPlayers[vid], a=hostPlayers[aid];
   if(!v||!a||vid===aid||phase!=='play'||!v.alive||!a.alive||v.invuln>0) return;
-  dmg=clamp(+dmg||0,1,50);
+  dmg=clamp(+dmg||0,1,200);
   v.hp-=dmg; v.lastHit=gt;
   if(v.hp<=0){
     v.hp=0; v.alive=false; v.d++; a.k++; v.respawn=RESPAWN_T;
@@ -1059,11 +1225,19 @@ function hostHandle(from,m){
       if(!p.spawned){p.spawned=true;hostSpawn(from)}
       break;
     case 'shot':
-      if(p.alive&&vec3ok(m.a)&&vec3ok(m.b)) bcast({t:'shot',a:m.a,b:m.b},from);
-      if(from!==0&&p.alive&&vec3ok(m.a)&&vec3ok(m.b)) clientHandle({t:'shot',a:m.a,b:m.b});
+      if(p.alive&&vec3ok(m.a)&&vec3ok(m.b)){
+        var sm={t:'shot',w:(typeof m.w==='string'&&WEAPONS[m.w])?m.w:'ar',a:m.a,b:m.b};
+        bcast(sm,from);
+        if(from!==0) clientHandle(sm);
+      }
       break;
     case 'hit':
-      hostDamage(+m.v,from,m.d,!!m.h);
+      // the host works out the damage from the weapon table, so clients can't claim arbitrary numbers
+      var wd=WEAPONS[m.w];
+      if(!wd) break;
+      var zz=(+m.z===1||+m.z===2)?+m.z:0, ff=(typeof m.f==='number'&&isFinite(m.f))?clamp(m.f,0,1):1, vp=hostPlayers[+m.v];
+      if(wd.kind==='melee'&&(!vp||Math.hypot(vp.x-p.x,vp.z-p.z)>wd.range+3)) break;
+      hostDamage(+m.v,from,calcDamage(wd,zz,ff),zz===1);
       break;
   }
 }
@@ -1235,6 +1409,78 @@ function joinRoom(code){
 }
 window.addEventListener('beforeunload',function(){ if(online) netLeave(); });
 
+/* ---------- weapon UI: loadout, switching, aim assist ---------- */
+var scopeEl=$('scope'), crossEl=$('crosshair'), loEl=$('loadout'), loSlotHome=$('lo-slot-home'), loSlotPause=$('lo-slot-pause'), loNote=$('lo-note');
+function weaponInfo(w){
+  if(w.kind==='melee') return w.name+' · 피해 '+w.dmg+' · 공격 간격 '+w.rate.toFixed(2)+'초 · 사거리 '+w.range+'m. '+w.desc;
+  var dmg=w.pellets>1?(w.dmg+'×'+w.pellets):w.dmg;
+  return w.name+' · 피해 '+dmg+' · 분당 '+Math.round(60/w.rate)+'발 · 탄창 '+w.mag+' · '+(w.auto?'연사':'단발')+'. '+w.desc;
+}
+function mountLoadout(home){(home?loSlotHome:loSlotPause).appendChild(loEl);loNote.hidden=home}
+(function initLoadout(){
+  var sel={p:$('lo-p'),m:$('lo-m'),r:$('lo-r')}, slots={p:0,m:1,r:2}, desc=$('lo-desc');
+  Object.keys(sel).forEach(function(key){
+    var el=sel[key];
+    Object.keys(WEAPONS).forEach(function(id){
+      var w=WEAPONS[id]; if(w.slot!==slots[key]) return;
+      var o=document.createElement('option'); o.value=id; o.textContent=w.name; el.appendChild(o);
+    });
+    el.value=loadout[key];
+    el.addEventListener('change',function(){
+      loadout[key]=el.value; desc.textContent=weaponInfo(WEAPONS[el.value]);
+      try{localStorage.setItem('azero-loadout',JSON.stringify(loadout))}catch(e){}
+    });
+    el.addEventListener('focus',function(){desc.textContent=weaponInfo(WEAPONS[el.value])});
+  });
+  desc.textContent=weaponInfo(WEAPONS[loadout.r]);
+})();
+function switchTo(i){
+  if(!player.alive||i===player.cur||i<0||i>2) return;
+  player.last=player.cur; player.cur=i;
+  player.reloading=0; player.equip=0.35; player.zoomToggle=false; player.swing=0; player.fireCd=0.1;
+  buildVM(); blip(500,0.04,0.03,'square');
+}
+function cycleWeapon(dir){switchTo((player.cur+dir+3)%3)}
+window.addEventListener('keydown',function(e){
+  if(!running||paused||!player.alive) return;
+  if(e.code==='Digit1') switchTo(0);
+  else if(e.code==='Digit2') switchTo(1);
+  else if(e.code==='Digit3') switchTo(2);
+  else if(e.code==='KeyQ') switchTo(player.last);
+});
+window.addEventListener('wheel',function(e){
+  if(!running||paused||!player.alive||!locked) return;
+  cycleWeapon(e.deltaY>0?1:-1);
+},{passive:true});
+
+// Weak aim assist, touch devices only: when an enemy is already close to the crosshair (and in view),
+// the camera is eased a little toward their chest. The pull is stronger while firing, weaker while
+// the player is dragging the view, and weaker again while scoped.
+var AIM_ASSIST_IDLE=0.6, AIM_ASSIST_FIRE=1.6;
+function aimAssist(dt,def){
+  if(!touchUI||!player.alive) return;
+  var best=null, cp=player.pos, maxDist=def.kind==='melee'?4.5:60;
+  function consider(x,y,z){
+    var dx=x-cp.x, dy=y-cp.y, dz=z-cp.z, hd=Math.hypot(dx,dz), dist=Math.hypot(hd,dy);
+    if(dist<1||dist>maxDist) return;
+    var ty=Math.atan2(-dx,-dz), tp=Math.atan2(dy,hd);
+    var ey=Math.atan2(Math.sin(ty-player.yaw),Math.cos(ty-player.yaw)), ep=tp-player.pitch;
+    var ang=Math.hypot(ey*Math.cos(player.pitch),ep), cone=clamp(Math.atan2(0.9,dist),0.035,0.13);
+    if(ang<cone&&(!best||ang<best.ang)) best={ey:ey,ep:ep,ang:ang,cone:cone,x:x,y:y,z:z};
+  }
+  if(online){for(var id in remotes){var r=remotes[id];if(r.alive&&r.group.visible) consider(r.group.position.x,1.2,r.group.position.z)}}
+  else bots.forEach(function(b){if(b.alive) consider(b.pos.x,1.2,b.pos.z)});
+  if(!best) return;
+  tmpV.set(best.x-cp.x,best.y-cp.y,best.z-cp.z);
+  var d=tmpV.length(); tmpV.normalize();
+  losRay.set(cp,tmpV); losRay.far=d;
+  if(losRay.intersectObjects(solidMeshes,false).length) return;      // walls block the pull
+  var rate=(firing?AIM_ASSIST_FIRE:AIM_ASSIST_IDLE)*(lookId!==null?0.5:1)*(player.zoomed?0.4:1);
+  var k=Math.min(1,rate*dt)*(1-0.3*best.ang/best.cone);
+  player.yaw+=best.ey*k;
+  player.pitch=clamp(player.pitch+best.ep*k,-1.45,1.45);
+}
+
 /* ---------- touch controls ---------- */
 var touchUI=false, touchMove={x:0,y:0}, touchJump=false, touchShown=false;
 var tEl=$('touch'), stickEl=$('stick'), knobEl=$('knob'), rotateEl=$('rotate');
@@ -1255,8 +1501,8 @@ function tryFullscreen(){
 }
 function tLook(dx,dy){
   if(!running||paused||!player.alive) return;
-  player.yaw-=dx*TOUCH_SENS;
-  player.pitch=clamp(player.pitch-dy*TOUCH_SENS,-1.45,1.45);
+  player.yaw-=dx*TOUCH_SENS*fovScale;
+  player.pitch=clamp(player.pitch-dy*TOUCH_SENS*fovScale,-1.45,1.45);
 }
 function placeStick(x,y){stickEl.style.left=x+'px';stickEl.style.top=y+'px'}
 function restStick(){
@@ -1294,6 +1540,8 @@ tEl.addEventListener('touchstart',function(e){
       else if(kind==='jump'){ touchJump=true; flash(b); }
       else if(kind==='reload'){ startReload(); flash(b); }
       else if(kind==='pause'){ flash(b); pause(); }
+      else if(kind==='weapon'){ cycleWeapon(1); flash(b); }
+      else if(kind==='scope'){ if(curDef().zoom) player.zoomToggle=!player.zoomToggle; }
     }else if(t.clientX<W*0.5&&stickId===null){
       stickId=t.identifier; stickO={x:t.clientX-r.left,y:t.clientY-r.top};
       placeStick(stickO.x,stickO.y); stickEl.classList.add('on');
@@ -1386,5 +1634,4 @@ requestAnimationFrame(frame);
 })();
 </script>
 
-</body>
-</html>
+</body></html>
