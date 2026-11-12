@@ -2,7 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Arena Zero</title>
 <style>:root{color-scheme:dark}html,body{margin:0}[hidden]{display:none!important}</style>
 </head>
@@ -25,7 +27,7 @@
   --font-body:"Inter",system-ui,-apple-system,"Segoe UI","Noto Sans KR",sans-serif;
   color-scheme:dark;
 }
-html,body{height:100%}
+html,body{height:100%;overscroll-behavior:none}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;overflow:hidden;-webkit-user-select:none;user-select:none}
 #app{position:relative;width:100%;height:100%;overflow:hidden;background:var(--bg)}
 #app canvas{display:block;width:100%;height:100%;touch-action:none}
@@ -111,6 +113,24 @@ input[type=text]:disabled{opacity:.5}
 .room .row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
 .room .btn{width:auto;padding:9px 14px;font-size:13px}
 #banner{position:absolute;left:50%;top:30%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);padding:12px 22px;background:var(--panel);border:1px solid var(--accent);border-radius:2px;font-size:20px;font-weight:700;letter-spacing:.04em;text-align:center}
+/* touch controls */
+#touch{position:absolute;inset:0;touch-action:none;-webkit-touch-callout:none;font-family:var(--font-display)}
+#stick{position:absolute;width:128px;height:128px;margin:-64px 0 0 -64px;border:2px solid rgba(255,255,255,.28);border-radius:50%;background:rgba(255,255,255,.05);pointer-events:none;opacity:.55}
+#stick.on{opacity:1}
+#knob{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;background:rgba(255,255,255,.38);border:2px solid rgba(255,255,255,.6)}
+.tbtn{position:absolute;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.4);border-radius:50%;background:rgba(12,17,24,.55);color:var(--fg);font-weight:700;letter-spacing:.06em;font-size:14px;-webkit-user-select:none;user-select:none;touch-action:none}
+.tbtn.on{background:rgba(255,255,255,.3)}
+.t-fire{width:96px;height:96px;right:max(28px,env(safe-area-inset-right,0px));bottom:max(28px,env(safe-area-inset-bottom,0px));background:rgba(255,106,61,.6);border-color:var(--accent);font-size:17px}
+.t-fire.on{background:rgba(255,106,61,.95);color:var(--accent-ink)}
+.t-jump{width:64px;height:64px;right:calc(max(28px,env(safe-area-inset-right,0px)) + 112px);bottom:max(40px,env(safe-area-inset-bottom,0px))}
+.t-reload{width:56px;height:56px;right:calc(max(28px,env(safe-area-inset-right,0px)) + 20px);bottom:calc(max(28px,env(safe-area-inset-bottom,0px)) + 112px)}
+.t-score{width:44px;height:44px;right:max(16px,env(safe-area-inset-right,0px));top:calc(max(16px,env(safe-area-inset-top,0px)) + 52px);font-size:12px}
+.t-pause{width:44px;height:44px;right:max(16px,env(safe-area-inset-right,0px));top:max(16px,env(safe-area-inset-top,0px));font-size:14px}
+#rotate{display:none;position:absolute;left:50%;top:84px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);padding:8px 14px;background:var(--panel);border:1px solid var(--line);border-radius:2px;color:var(--muted);font-size:13px;text-align:center;pointer-events:none}
+@media (orientation:portrait){#rotate:not([hidden]){display:block}}
+.touch .hud-br{bottom:auto;top:16px;right:72px;min-width:0;padding:6px 12px}
+.touch .hud-br .ammo b{font-size:30px}
+.touch .hud-bl{left:50%;transform:translateX(-50%);bottom:10px;min-width:180px}
 @media (max-width:520px){
   .hud-tl{gap:12px;padding:6px 10px}
   .kv b{font-size:20px}
@@ -152,6 +172,16 @@ input[type=text]:disabled{opacity:.5}
     </div>
   </div>
 
+  <div id="touch" hidden>
+    <div id="stick"><i id="knob"></i></div>
+    <div class="tbtn t-fire" data-btn="fire">발사</div>
+    <div class="tbtn t-jump" data-btn="jump">점프</div>
+    <div class="tbtn t-reload" data-btn="reload">장전</div>
+    <div class="tbtn t-score" data-btn="score">점수</div>
+    <div class="tbtn t-pause" data-btn="pause">II</div>
+  </div>
+  <div id="rotate" hidden>가로로 돌리면 더 편하게 플레이할 수 있어요.</div>
+
   <div id="hint" hidden>마우스 잠금이 막혀 있어요. 우클릭을 누른 채 드래그하거나 방향키로 시점을 움직이세요. 새 탭이나 전체 화면에서는 마우스 잠금이 동작합니다.</div>
 
   <div id="menu" class="overlay">
@@ -183,7 +213,7 @@ input[type=text]:disabled{opacity:.5}
           <button id="leave" class="btn ghost" type="button">메인으로</button>
         </div>
       </div>
-      <dl class="keys">
+      <dl class="keys" id="keys-desktop">
         <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>이동</dd>
         <dt><kbd>Shift</kbd></dt><dd>달리기 (앞으로 이동 중)</dd>
         <dt><kbd>Space</kbd></dt><dd>점프 (낮은 상자 위로 올라갈 수 있어요)</dd>
@@ -193,7 +223,14 @@ input[type=text]:disabled{opacity:.5}
         <dt><kbd>M</kbd></dt><dd>소리 끄기 / 켜기</dd>
         <dt><kbd>Esc</kbd></dt><dd>일시정지</dd>
       </dl>
-      <p id="menu-note" class="note">온라인은 방 코드를 아는 사람끼리 직접 연결됩니다(최대 6명). 방을 만든 사람이 창을 닫으면 대전이 끝나요. 키보드와 마우스가 있는 데스크톱에서 플레이하세요.</p>
+      <dl class="keys" id="keys-touch" hidden>
+        <dt><kbd>왼쪽 화면</kbd></dt><dd>조이스틱으로 이동 (끝까지 밀면 달리기)</dd>
+        <dt><kbd>오른쪽 화면</kbd></dt><dd>드래그해서 시점 이동</dd>
+        <dt><kbd>발사</kbd></dt><dd>누르고 있으면 연사, 누른 채 움직이면 조준</dd>
+        <dt><kbd>점프</kbd> <kbd>장전</kbd></dt><dd>점프와 재장전</dd>
+        <dt><kbd>점수</kbd> <kbd>II</kbd></dt><dd>점수판(누르는 동안), 일시정지</dd>
+      </dl>
+      <p id="menu-note" class="note">온라인은 방 코드를 아는 사람끼리 직접 연결됩니다(최대 6명). 방을 만든 사람이 창을 닫으면 대전이 끝나요. PC는 키보드와 마우스, 모바일은 화면 터치로 조작합니다. 모바일은 가로 모드를 권장해요.</p>
     </div>
   </div>
 </div>
@@ -406,7 +443,7 @@ function spawnPlayer(sx,sz,syaw){
 /* ---------- audio (synth, no assets) ---------- */
 var actx=null, noiseBuf=null, muted=false;
 function initAudio(){
-  if(actx) return;
+  if(actx){ try{ if(actx.state==='suspended') actx.resume(); }catch(e){} return; }
   try{
     actx=new (window.AudioContext||window.webkitAudioContext)();
     var len=Math.floor(actx.sampleRate*0.25);
@@ -574,6 +611,7 @@ function endMatch(win){
 
 /* ---------- input ---------- */
 function requestLock(){
+  if(touchUI){fallback=false;hintEl.hidden=true;return}
   try{
     var r=renderer.domElement.requestPointerLock();
     if(r&&r.catch) r.catch(function(){});
@@ -583,24 +621,24 @@ function requestLock(){
   },450);
 }
 startBtn.addEventListener('click',function(){
-  initAudio(); startBtn.blur(); saveName();
+  initAudio(); tryFullscreen(); startBtn.blur(); saveName();
   setStatus('');
   beginGame();
   requestLock();
 });
 $('resume').addEventListener('click',function(){
-  initAudio(); $('resume').blur();
+  initAudio(); tryFullscreen(); $('resume').blur();
   paused=false; menu.hidden=true;
   if(online&&!readySent){readySent=true;sendHost({t:'ready'})}
   requestLock();
 });
 $('leave').addEventListener('click',function(){ leaveGame('Arena Zero',DEFAULT_SUB); });
-$('host').addEventListener('click',function(){ if(connecting) return; initAudio(); saveName(); hostRoom(0); });
+$('host').addEventListener('click',function(){ if(connecting) return; initAudio(); tryFullscreen(); saveName(); hostRoom(0); });
 $('join').addEventListener('click',function(){
   if(connecting) return;
   var c=(codeEl.value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
   if(c.length!==5){setStatus('방 코드는 5자리입니다.',true);return}
-  initAudio(); saveName(); joinRoom(c);
+  initAudio(); tryFullscreen(); saveName(); joinRoom(c);
 });
 codeEl.addEventListener('keydown',function(e){ if(e.key==='Enter') $('join').click(); });
 $('copy').addEventListener('click',function(){
@@ -810,16 +848,17 @@ function updatePlayer(dt){
   player.yaw+=lookX*2.2*dt;
   player.pitch=clamp(player.pitch+lookY*1.6*dt,-1.45,1.45);
 
-  var fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0), str=(keys.KeyD?1:0)-(keys.KeyA?1:0);
-  var sprint=(keys.ShiftLeft||keys.ShiftRight)&&fwd>0;
+  var fwd=(keys.KeyW?1:0)-(keys.KeyS?1:0)+touchMove.y, str=(keys.KeyD?1:0)-(keys.KeyA?1:0)+touchMove.x;
+  var sprint=((keys.ShiftLeft||keys.ShiftRight)&&fwd>0)||(touchMove.y>0.55&&Math.hypot(touchMove.x,touchMove.y)>0.9);
   var speed=sprint?8:5.5, vx=0, vz=0;
   if(fwd||str){
-    var l=Math.hypot(fwd,str), f=fwd/l, s=str/l, sy=Math.sin(player.yaw), cy=Math.cos(player.yaw);
-    vx=(-sy*f+cy*s)*speed; vz=(-cy*f-sy*s)*speed;
+    var l=Math.hypot(fwd,str), mag=Math.min(1,l), f=fwd/l, s=str/l, sy=Math.sin(player.yaw), cy=Math.cos(player.yaw);
+    vx=(-sy*f+cy*s)*speed*mag; vz=(-cy*f-sy*s)*speed*mag;
   }
   var k=Math.min(1,dt*(player.onGround?14:3));
   player.vel.x+=(vx-player.vel.x)*k; player.vel.z+=(vz-player.vel.z)*k;
-  if(keys.Space&&player.onGround){player.vel.y=6.2;player.onGround=false}
+  if((keys.Space||touchJump)&&player.onGround){player.vel.y=6.2;player.onGround=false}
+  touchJump=false;
   if(!player.onGround) player.vel.y-=20*dt;
   player.pos.x+=player.vel.x*dt; player.pos.z+=player.vel.z*dt; player.pos.y+=player.vel.y*dt;
 
@@ -831,7 +870,7 @@ function updatePlayer(dt){
   if(player.invuln>0) player.invuln-=dt;
   if(player.fireCd>0) player.fireCd-=dt;
   if(player.reloading>0){player.reloading-=dt;if(player.reloading<=0){player.reloading=0;player.ammo=MAG}}
-  else if(firing&&player.fireCd<=0&&(locked||fallback)&&!(online&&phase==='ended')) shoot();
+  else if(firing&&player.fireCd<=0&&(locked||fallback||touchUI)&&!(online&&phase==='ended')) shoot();
   if(!online&&gt-player.lastHit>5&&player.hp<100) player.hp=Math.min(100,player.hp+12*dt);
   player.recoil=Math.max(0,player.recoil-dt*10);
   player.dmgFlash=Math.max(0,player.dmgFlash-dt*1.8);
@@ -1196,8 +1235,114 @@ function joinRoom(code){
 }
 window.addEventListener('beforeunload',function(){ if(online) netLeave(); });
 
+/* ---------- touch controls ---------- */
+var touchUI=false, touchMove={x:0,y:0}, touchJump=false, touchShown=false;
+var tEl=$('touch'), stickEl=$('stick'), knobEl=$('knob'), rotateEl=$('rotate');
+var fireBtn=tEl.querySelector('[data-btn="fire"]'), scoreBtn=tEl.querySelector('[data-btn="score"]');
+var stickId=null, stickO={x:0,y:0}, lookId=null, lookLast=null, fireId=null, fireLast=null, scoreId=null;
+var STICK_R=56, STICK_DEAD=0.12, TOUCH_SENS=0.0042;
+
+function mq(q){try{return !!(window.matchMedia&&window.matchMedia(q).matches)}catch(e){return false}}
+function detectTouch(){
+  var m=/[?&]touch=([01])(?:&|$)/.exec(location.search);
+  if(m) return m[1]==='1';
+  return mq('(pointer: coarse)')||((navigator.maxTouchPoints||0)>0&&!mq('(any-pointer: fine)'));
+}
+function tryFullscreen(){
+  if(!touchUI) return;
+  try{var el=document.documentElement,p=el.requestFullscreen&&el.requestFullscreen();if(p&&p.catch) p.catch(function(){})}catch(e){}
+  try{var o=screen.orientation&&screen.orientation.lock&&screen.orientation.lock('landscape');if(o&&o.catch) o.catch(function(){})}catch(e){}
+}
+function tLook(dx,dy){
+  if(!running||paused||!player.alive) return;
+  player.yaw-=dx*TOUCH_SENS;
+  player.pitch=clamp(player.pitch-dy*TOUCH_SENS,-1.45,1.45);
+}
+function placeStick(x,y){stickEl.style.left=x+'px';stickEl.style.top=y+'px'}
+function restStick(){
+  var r=tEl.getBoundingClientRect();
+  placeStick(Math.max(96,r.width*0.14),r.height-100);
+  knobEl.style.transform='translate(0px,0px)';
+  stickEl.classList.remove('on');
+}
+function resetTouch(){
+  stickId=lookId=fireId=scoreId=null;
+  touchMove.x=0; touchMove.y=0; touchJump=false; firing=false;
+  boardEl.hidden=true; restStick();
+  Array.prototype.forEach.call(tEl.querySelectorAll('.tbtn.on'),function(b){b.classList.remove('on')});
+}
+function syncTouch(){
+  var show=touchUI&&running&&!paused&&!ended;
+  if(show===touchShown) return;
+  touchShown=show; tEl.hidden=!show; rotateEl.hidden=!show;
+  if(show) restStick(); else resetTouch();
+}
+function btnOf(t){
+  var el=t.target;
+  while(el&&el!==tEl){ if(el.getAttribute&&el.getAttribute('data-btn')) return el; el=el.parentNode; }
+  return null;
+}
+function flash(b){b.classList.add('on');setTimeout(function(){b.classList.remove('on')},120)}
+tEl.addEventListener('touchstart',function(e){
+  e.preventDefault();
+  var W=tEl.clientWidth||window.innerWidth, r=tEl.getBoundingClientRect();
+  for(var i=0;i<e.changedTouches.length;i++){
+    var t=e.changedTouches[i], b=btnOf(t), kind=b&&b.getAttribute('data-btn');
+    if(kind){
+      if(kind==='fire'){ if(fireId===null){fireId=t.identifier;fireLast={x:t.clientX,y:t.clientY};firing=true;b.classList.add('on')} }
+      else if(kind==='score'){ scoreId=t.identifier; boardEl.hidden=false; renderBoard(); b.classList.add('on'); }
+      else if(kind==='jump'){ touchJump=true; flash(b); }
+      else if(kind==='reload'){ startReload(); flash(b); }
+      else if(kind==='pause'){ flash(b); pause(); }
+    }else if(t.clientX<W*0.5&&stickId===null){
+      stickId=t.identifier; stickO={x:t.clientX-r.left,y:t.clientY-r.top};
+      placeStick(stickO.x,stickO.y); stickEl.classList.add('on');
+    }else if(t.clientX>=W*0.5&&lookId===null){
+      lookId=t.identifier; lookLast={x:t.clientX,y:t.clientY};
+    }
+  }
+},{passive:false});
+tEl.addEventListener('touchmove',function(e){
+  e.preventDefault();
+  var r=tEl.getBoundingClientRect();
+  for(var i=0;i<e.changedTouches.length;i++){
+    var t=e.changedTouches[i], id=t.identifier;
+    if(id===stickId){
+      var dx=t.clientX-r.left-stickO.x, dy=t.clientY-r.top-stickO.y, d=Math.hypot(dx,dy);
+      if(d>STICK_R){dx*=STICK_R/d;dy*=STICK_R/d;d=STICK_R}
+      knobEl.style.transform='translate('+dx+'px,'+dy+'px)';
+      var m=d/STICK_R;
+      if(m<STICK_DEAD||d===0){touchMove.x=0;touchMove.y=0}
+      else{
+        var m2=clamp((m-STICK_DEAD)/(1-STICK_DEAD),0,1);
+        touchMove.x=dx/d*m2; touchMove.y=-dy/d*m2;
+      }
+    }else if(id===lookId){
+      tLook(t.clientX-lookLast.x,t.clientY-lookLast.y); lookLast={x:t.clientX,y:t.clientY};
+    }else if(id===fireId){
+      tLook(t.clientX-fireLast.x,t.clientY-fireLast.y); fireLast={x:t.clientX,y:t.clientY};
+    }
+  }
+},{passive:false});
+function touchEnd(e){
+  e.preventDefault();
+  for(var i=0;i<e.changedTouches.length;i++){
+    var id=e.changedTouches[i].identifier;
+    if(id===stickId){stickId=null;touchMove.x=0;touchMove.y=0;restStick()}
+    else if(id===lookId){lookId=null}
+    else if(id===fireId){fireId=null;firing=false;fireBtn.classList.remove('on')}
+    else if(id===scoreId){scoreId=null;boardEl.hidden=true;scoreBtn.classList.remove('on')}
+  }
+}
+tEl.addEventListener('touchend',touchEnd,{passive:false});
+tEl.addEventListener('touchcancel',touchEnd,{passive:false});
+document.addEventListener('gesturestart',function(e){e.preventDefault()});
+document.addEventListener('visibilitychange',function(){ if(touchUI&&document.hidden&&running&&!online) pause(); });
+
 /* ---------- boot ---------- */
 (function boot(){
+  touchUI=detectTouch();
+  if(touchUI){ app.classList.add('touch'); $('keys-desktop').hidden=true; $('keys-touch').hidden=false; }
   try{ if(window.claude){ noNet=true; $('host').disabled=true; $('join').disabled=true; codeEl.disabled=true; setStatus('온라인 대전은 이 미리보기에서는 쓸 수 없습니다. GitHub Pages 주소에서 이용해 주세요.'); } }catch(e){}
   var m=/[?&]room=([A-Za-z0-9]{5})(?:&|$)/.exec(location.search);
   if(m&&!noNet){ codeEl.value=m[1].toUpperCase(); setStatus('초대받은 방 코드가 입력되었습니다. 이름을 확인하고 참가를 누르세요.'); }
@@ -1214,6 +1359,7 @@ var last=performance.now();
 function frame(now){
   requestAnimationFrame(frame);
   var dt=Math.min(0.05,(now-last)/1000); last=now;
+  syncTouch();
   if(running&&(!paused||online)){
     gt+=dt;
     if(online&&!player.spawned) orbitCam(now); else updatePlayer(dt);
