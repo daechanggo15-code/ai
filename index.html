@@ -705,7 +705,7 @@ function poseChar(c,dt,sp,airborne,rl,melee,pitch){
   var dip=(1-Math.cos(c.rp*6.2832))/2;
   if(melee&&!c.pm) c.mt=0.32; c.pm=!!melee;
   if(c.mt>0) c.mt=Math.max(0,c.mt-dt);
-  var u=c.mt>0?1-c.mt/0.32:0, mw=c.mt>0?1:0;
+  var u=c.mt>0?1-c.mt/0.32:0, mw=(c.hold||c.mt>0)?1:0;
   var sway=Math.sin(t*1.7)*0.006, bob=Math.sin(c.ph*2)*0.022*c.sw*ground;
   var pit=c.pitch*0.85, aw=1-c.rl*0.35;
   c.gun.visible=mw===0; c.blade.visible=mw===1;
@@ -715,7 +715,7 @@ function poseChar(c,dt,sp,airborne,rl,melee,pitch){
   var sl=Math.sin(c.ph)*0.08*c.sw*ground;
   c.armR.p.rotation.x=c.armR.rx+pit*aw+bob*3+c.kick*0.1+0.2*c.air+sl;
   c.armL.p.rotation.x=c.armL.rx+pit*aw+bob*3+c.kick*0.1+0.2*c.air-sl-c.rl*(0.2+0.7*dip);
-  if(mw){var e=1-Math.pow(1-u,2); c.armR.p.rotation.x=c.armR.rx+1.0-2.1*e; c.armL.p.rotation.x=c.armL.rx-0.5*Math.sin(u*3.1416)}
+  if(mw){var e=c.mt>0?1-Math.pow(1-u,2):0.31; c.armR.p.rotation.x=c.armR.rx+1.0-2.1*e; c.armL.p.rotation.x=c.armL.rx-0.5*Math.sin(u*3.1416)}
   // effects
   var fx=c.fx;
   if(c.flashT>0) c.flashT-=dt;
@@ -731,7 +731,7 @@ function poseChar(c,dt,sp,airborne,rl,melee,pitch){
       if(c.prp<0.72&&c.rp>=0.72) clickSpark(c,fx);
     }
     c.prp=c.rp;
-    if(mw) bladeTrail(c,fx);
+    if(c.mt>0) bladeTrail(c,fx);
   }
 }
 function charFire(c){if(c) c.kick=1}
@@ -744,7 +744,7 @@ function animChars(dt){
     var d=Math.min(Math.hypot(p.x-c.lx,p.z-c.lz),1), vy=(p.y-c.ly)/dt; c.lx=p.x; c.lz=p.z; c.ly=p.y;
     var sp=Math.min(d/dt,9), I=c.in;
     if(I.fire){c.kickT-=dt; if(c.kickT<=0){c.kick=1;c.kickT=0.11}} else c.kickT=0;
-    poseChar(c,dt,sp,Math.abs(vy)>1.1,I.rl,I.melee,I.pitch);
+    c.hold=!!I.hold; poseChar(c,dt,sp,Math.abs(vy)>1.1,I.rl,I.melee,I.pitch);
   }
 }
 /* fallen soldiers: a fresh model that topples over, then sinks away */
@@ -1394,7 +1394,7 @@ function myAct(){
   if(!player.alive) return 0;
   if(player.reloading>0) a|=1;
   if(d.kind==='gun'&&gt-(player.lastShot||-9)<0.14) a|=2;
-  if(d.kind==='melee'&&player.swing>0) a|=4;
+  if(d.kind==='melee'){a|=8; if(player.swing>0) a|=4}
   return a;
 }
 function vec3ok(a){return Array.isArray(a)&&a.length===3&&a.every(function(n){return typeof n==='number'&&isFinite(n)&&Math.abs(n)<500})}
@@ -1472,7 +1472,7 @@ function clientHandle(m){
         var r=remotes[e[0]];
         if(!r||e[0]===myId) return;
         r.tx=e[1]; r.ty=e[2]; r.tz=e[3]; r.tyaw=e[4];
-        if(r.ch&&typeof e[5]==='number'){var I=r.ch.in; I.rl=e[5]&1; I.fire=e[5]&2; I.melee=e[5]&4; I.pitch=+e[6]||0}
+        if(r.ch&&typeof e[5]==='number'){var I=r.ch.in; I.rl=e[5]&1; I.fire=e[5]&2; I.melee=e[5]&4; I.hold=e[5]&8; I.pitch=+e[6]||0}
         if(!r.hasPos&&r.alive){r.group.position.set(e[1],e[2]-EYE,e[3]);r.group.rotation.y=e[4];r.hasPos=true;spawnFX(FXM,e[1],e[3])}
       });
       break;
@@ -1553,7 +1553,7 @@ function hostHandle(from,m){
     case 's':
       if([m.x,m.y,m.z,m.yaw].every(function(n){return typeof n==='number'&&isFinite(n)&&Math.abs(n)<500})){
         p.x=m.x; p.y=m.y; p.z=m.z; p.yaw=m.yaw;
-        p.a=(typeof m.a==='number'&&m.a>=0&&m.a<8)?(m.a|0):0;
+        p.a=(typeof m.a==='number'&&m.a>=0&&m.a<16)?(m.a|0):0;
         p.pt=(typeof m.pt==='number'&&isFinite(m.pt)&&Math.abs(m.pt)<2)?m.pt:0;
       }
       p.seen=gt;
