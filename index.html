@@ -116,6 +116,17 @@ option{background:#0b0f15;color:#e8edf2}
 .lo-note{margin:0;color:var(--muted);font-size:12px}
 .slots{display:flex;gap:6px}
 .slots span{min-width:22px;padding:2px 6px;border:1px solid var(--line);border-radius:2px;font-size:12px;font-weight:700;text-align:center;color:var(--muted)}
+.mp{display:grid;gap:8px;margin:0 0 16px}
+.mp-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.mp-card{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;padding:3px 3px 4px;border:1px solid var(--line);border-radius:2px;background:rgba(255,255,255,.04);color:var(--fg);font-family:var(--font-body);cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .15s}
+#app .mp-card canvas{display:block;width:100%;height:auto;aspect-ratio:7/5;background:#0b0f16}
+.mp-card b{font-size:10px;font-weight:700;letter-spacing:.04em;white-space:nowrap}
+.mp-card:hover{border-color:rgba(255,255,255,.4)}
+.mp-card:active{transform:scale(.96)}
+.mp-card.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 12px rgba(255,106,61,.3);transform:translateY(-2px)}
+.mp-info{display:grid;gap:3px;font-size:12px;line-height:1.5;color:var(--muted)}
+.mp-info strong{font-family:var(--font-display);font-size:16px;color:var(--fg);letter-spacing:.03em}
+.mp-info i{font-style:normal;margin-left:6px;font-size:10px;padding:1px 6px;border:1px solid var(--accent);color:var(--accent);font-weight:700;letter-spacing:.06em}
 .slots span.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 @keyframes pop{0%{transform:scale(1.5)}100%{transform:scale(1)}}
 @keyframes swapIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
@@ -296,6 +307,11 @@ option{background:#0b0f15;color:#e8edf2}
       <p id="menu-sub" class="sub">봇과 연습하거나, 방을 만들어 친구와 온라인으로 대전하세요. 먼저 킬 목표를 채우면 승리합니다.</p>
       <div id="home-box">
         <label class="field"><span class="label">이름</span><input id="name" type="text" maxlength="12" autocomplete="off" spellcheck="false"></label>
+        <div class="mp" id="map-pick">
+          <span class="label">맵</span>
+          <div class="mp-grid" id="mp-grid"></div>
+          <div class="mp-info" id="mp-info"></div>
+        </div>
         <div id="lo-slot-home">
           <div id="loadout" class="loadout">
             <span class="label">장비</span>
@@ -320,6 +336,7 @@ option{background:#0b0f15;color:#e8edf2}
         <p id="net-status" class="status" hidden></p>
       </div>
       <div id="pause-box" hidden>
+        <p id="map-now" class="lo-desc"></p>
         <div id="lo-slot-pause"></div>
         <div id="room-info" class="room" hidden>
           <span class="label">방 코드</span>
@@ -374,8 +391,7 @@ if(!T){
 }
 
 /* ---------- constants ---------- */
-var ARENA=36, EYE=1.7, RADIUS=0.45, MAG=30, GOAL=15, BOT_COUNT=6, RELOAD_TIME=1.5, SENS=0.0022, FOV0=75;
-var SPAWNS=[[-30,-30],[30,-30],[-30,30],[30,30],[0,-31],[0,31],[-31,0],[31,0]];
+var EYE=1.7, RADIUS=0.45, MAG=30, GOAL=15, BOT_COUNT=6, RELOAD_TIME=1.5, SENS=0.0022, FOV0=75;
 var clamp=function(v,a,b){return Math.max(a,Math.min(b,v))};
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 var rand=mulberry32(20261112); // fixed seed: every client builds the same arena
@@ -406,88 +422,457 @@ function resize(){
 window.addEventListener('resize',resize);
 resize();
 
-/* ---------- arena ---------- */
-function gridTexture(){
+/* ---------- maps: data model, collision, loading, bot navigation ---------- */
+// A solid is an axis-aligned footprint with a bottom (y0) and a top (y1). Ramps are solids whose top slopes along x or z.
+// Floors above the ground are slabs (y0 = top-0.3) that can be walked under and on; the same collision serves players and bots.
+var boxes=[], solidMeshes=[], SPAWNS=[], MAPS=[], MAP_BY_ID={}, curMap=null, mapObjs=[], mapMats=null, floorTex=null;
+var BX0=-36,BX1=36,BZ0=-36,BZ1=36;
+var edgeMat=new T.LineBasicMaterial({color:0x8fa2bd,transparent:true,opacity:.35});
+function topAt(s,x,z){
+  var r=s.ramp; if(!r) return s.y1;
+  var t=r.ax==='x'?(x-s.minX)/(s.maxX-s.minX):(z-s.minZ)/(s.maxZ-s.minZ);
+  t=t<0?0:(t>1?1:t);
+  return r.a+(r.b-r.a)*t;
+}
+function MB(id,name,shape,floors,desc,b,th){
+  var m={id:id,name:name,shape:shape,floors:floors,desc:desc,b:b,th:th,solids:[],spawns:[]};
+  m.rect=function(x0,z0,x1,z1,y1,mat,y0){m.solids.push({minX:Math.min(x0,x1),maxX:Math.max(x0,x1),minZ:Math.min(z0,z1),maxZ:Math.max(z0,z1),y0:y0||0,y1:y1,mat:mat||'A',ramp:null});return m};
+  m.box=function(cx,cz,w,d,h,mat){return m.rect(cx-w/2,cz-d/2,cx+w/2,cz+d/2,h,mat)};
+  m.fill=function(x0,z0,x1,z1){return m.rect(x0,z0,x1,z1,9,'W')};
+  m.slab=function(x0,z0,x1,z1,top,mat){return m.rect(x0,z0,x1,z1,top,mat||'R',top-0.3)};
+  m.rail=function(x0,z0,x1,z1,base){return m.rect(x0,z0,x1,z1,base+1.4,'B',base)};
+  // dir: '+x' '-x' '+z' '-z' = the way the ramp climbs. ya = height at the foot, yb = height at the top.
+  m.ramp=function(x0,z0,x1,z1,dir,ya,yb,mat){
+    var ax=dir.charAt(1), pos=dir.charAt(0)==='+';
+    m.solids.push({minX:Math.min(x0,x1),maxX:Math.max(x0,x1),minZ:Math.min(z0,z1),maxZ:Math.max(z0,z1),y0:0,y1:Math.max(ya,yb),mat:mat||'P',ramp:{ax:ax,a:pos?ya:yb,b:pos?yb:ya}});
+    return m;
+  };
+  // interior wall along an axis with door gaps: axis 'x' = wall at x=pos running over z in [a0,a1]
+  m.wall=function(axis,pos,a0,a1,gaps,h,mat){
+    var cur=a0, g=gaps.slice().sort(function(p,q){return p[0]-q[0]});
+    function seg(s,e){ if(e-s<0.2) return; if(axis==='x') m.rect(pos-0.5,s,pos+0.5,e,h,mat||'A'); else m.rect(s,pos-0.5,e,pos+0.5,h,mat||'A') }
+    g.forEach(function(q){seg(cur,q[0]);cur=q[1]}); seg(cur,a1);
+    return m;
+  };
+  m.sp=function(x,z,tx,tz,y){m.spawns.push([x,z,y||0,Math.atan2(-(tx-x),-(tz-z))]);return m};
+  MAPS.push(m); MAP_BY_ID[id]=m;
+  return m;
+}
+function sym4(fn){[1,-1].forEach(function(sx){[1,-1].forEach(function(sz){fn(sx,sz)})})}
+
+function mapTexture(base,w,d){
   var c=document.createElement('canvas'); c.width=c.height=256;
   var g=c.getContext('2d');
-  g.fillStyle='#202a38'; g.fillRect(0,0,256,256);
+  g.fillStyle=base; g.fillRect(0,0,256,256);
   g.strokeStyle='rgba(255,255,255,.08)'; g.lineWidth=3; g.strokeRect(0,0,256,256);
   g.strokeStyle='rgba(255,255,255,.035)'; g.lineWidth=2;
   g.beginPath(); g.moveTo(128,0); g.lineTo(128,256); g.moveTo(0,128); g.lineTo(256,128); g.stroke();
   var t=new T.CanvasTexture(c);
-  t.wrapS=t.wrapT=T.RepeatWrapping;
-  t.repeat.set(ARENA*2/4,ARENA*2/4);
-  t.anisotropy=4;
+  t.wrapS=t.wrapT=T.RepeatWrapping; t.repeat.set(w/4,d/4); t.anisotropy=4;
   return t;
 }
-var floor=new T.Mesh(new T.PlaneGeometry(ARENA*2,ARENA*2),new T.MeshLambertMaterial({map:gridTexture()}));
-floor.rotation.x=-Math.PI/2;
-scene.add(floor);
-
-var boxes=[], solidMeshes=[];
-var matA=new T.MeshLambertMaterial({color:0x3b475a});
-var matB=new T.MeshLambertMaterial({color:0x7a6650});
-var matC=new T.MeshLambertMaterial({color:0x4a5668});
-var edgeMat=new T.LineBasicMaterial({color:0x8fa2bd,transparent:true,opacity:.35});
-function addBox(cx,cz,w,d,h,mat,collide){
-  var m=new T.Mesh(new T.BoxGeometry(w,h,d),mat);
-  m.position.set(cx,h/2,cz);
-  m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry),edgeMat));
-  scene.add(m);
-  solidMeshes.push(m);
-  if(collide!==false) boxes.push({minX:cx-w/2,maxX:cx+w/2,minZ:cz-d/2,maxZ:cz+d/2,h:h});
+function clearMapObjs(){
+  mapObjs.forEach(function(o){
+    scene.remove(o);
+    if(o.geometry) o.geometry.dispose();
+    o.children.forEach(function(c){if(c.geometry) c.geometry.dispose()});
+  });
+  mapObjs=[];
+  if(mapMats){for(var k in mapMats) mapMats[k].dispose(); mapMats=null}
+  if(floorTex){floorTex.dispose(); floorTex=null}
 }
-var wallMat=new T.MeshLambertMaterial({color:0x2a3446});
-addBox(0,-ARENA-0.5,ARENA*2+2,1,6,wallMat,false);
-addBox(0,ARENA+0.5,ARENA*2+2,1,6,wallMat,false);
-addBox(-ARENA-0.5,0,1,ARENA*2,6,wallMat,false);
-addBox(ARENA+0.5,0,1,ARENA*2,6,wallMat,false);
+function wedgeGeometry(s){
+  var r=s.ramp, L=r.ax==='x'?s.maxX-s.minX:s.maxZ-s.minZ, W=r.ax==='x'?s.maxZ-s.minZ:s.maxX-s.minX;
+  var sh=new T.Shape(); sh.moveTo(0,0); sh.lineTo(L,0); sh.lineTo(L,Math.max(r.b,0.01)); sh.lineTo(0,Math.max(r.a,0.01)); sh.lineTo(0,0);
+  return new T.ExtrudeGeometry(sh,{depth:W,bevelEnabled:false});
+}
+function loadMap(id){
+  var m=MAP_BY_ID[Object.prototype.hasOwnProperty.call(MAP_BY_ID,id)?id:'classic'];
+  if(curMap===m) return m;
+  clearMapObjs();
+  curMap=m; BX0=m.b[0]; BX1=m.b[1]; BZ0=m.b[2]; BZ1=m.b[3];
+  boxes.length=0; solidMeshes.length=0;
+  var th=m.th;
+  function L(c,e){return new T.MeshLambertMaterial(e?{color:c,emissive:e}:{color:c})}
+  mapMats={A:L(th.A),B:L(th.B),C:L(th.C),W:L(th.W),K:L(th.K,0x3a1608),P:L(th.P),R:L(th.R)};
+  scene.background.setHex(th.bg); scene.fog.color.setHex(th.bg);
+  var bw=BX1-BX0, bd=BZ1-BZ0;
+  floorTex=mapTexture(th.fl,bw,bd);
+  var fl=new T.Mesh(new T.PlaneGeometry(bw,bd),new T.MeshLambertMaterial({map:floorTex}));
+  fl.rotation.x=-Math.PI/2; fl.position.set((BX0+BX1)/2,0,(BZ0+BZ1)/2);
+  scene.add(fl); mapObjs.push(fl);
+  function mesh(geo,mat,x,y,z){
+    var o=new T.Mesh(geo,mat); o.position.set(x,y,z);
+    o.add(new T.LineSegments(new T.EdgesGeometry(geo),edgeMat));
+    scene.add(o); mapObjs.push(o); solidMeshes.push(o); return o;
+  }
+  // outer walls: visual + bullet blocking only, the bounds clamp keeps everyone inside
+  mesh(new T.BoxGeometry(bw+2,6,1),mapMats.W,(BX0+BX1)/2,3,BZ0-0.5);
+  mesh(new T.BoxGeometry(bw+2,6,1),mapMats.W,(BX0+BX1)/2,3,BZ1+0.5);
+  mesh(new T.BoxGeometry(1,6,bd),mapMats.W,BX0-0.5,3,(BZ0+BZ1)/2);
+  mesh(new T.BoxGeometry(1,6,bd),mapMats.W,BX1+0.5,3,(BZ0+BZ1)/2);
+  m.solids.forEach(function(s){
+    boxes.push(s);
+    if(s.ramp){
+      var g=wedgeGeometry(s), o;
+      if(s.ramp.ax==='x') o=mesh(g,mapMats[s.mat],s.minX,0,s.minZ);
+      else{ o=mesh(g,mapMats[s.mat],s.maxX,0,s.minZ); o.rotation.y=-Math.PI/2 }
+    }else{
+      mesh(new T.BoxGeometry(s.maxX-s.minX,s.y1-s.y0,s.maxZ-s.minZ),mapMats[s.mat],(s.minX+s.maxX)/2,(s.y0+s.y1)/2,(s.minZ+s.maxZ)/2);
+    }
+  });
+  scene.updateMatrixWorld(true);
+  SPAWNS=m.spawns;
+  buildNav();
+  try{localStorage.setItem('azero-map',m.id)}catch(e){}
+  if(typeof bots!=='undefined'){ clearCorpses(); bots.forEach(function(b){if(b.alive) spawnBot(b)}) }
+  if(typeof mapPickRefresh==='function') mapPickRefresh();
+  return m;
+}
 
-// Hand-built map (same on every client). Four-fold symmetric: central keep, L-shaped bunkers, low cover that can be jumped onto.
-var matCore=new T.MeshLambertMaterial({color:0xff6a3d,emissive:0x3a1608});
-addBox(0,0,5,5,4.5,matCore);                    // central keep
-addBox(0,9,14,1.2,0.8,matB); addBox(0,-9,14,1.2,0.8,matB);      // low walls around the keep
-addBox(9,0,1.2,14,0.8,matB); addBox(-9,0,1.2,14,0.8,matB);
-[[1,1],[1,-1],[-1,1],[-1,-1]].forEach(function(q){
-  var sx=q[0], sz=q[1];
-  addBox(sx*20,sz*14,3,8,4,matA);               // L bunker, long side
-  addBox(sx*14,sz*20,8,3,4,matA);               // L bunker, short side
-  addBox(sx*10,sz*10,3,3,0.8,matB);             // crate beside the keep
-  addBox(sx*26,sz*8,2,2,3,matC);                // pillars on the flanks
-  addBox(sx*8,sz*26,2,2,3,matC);
-  addBox(sx*30,sz*22,5,1,0.8,matB);             // cover in front of the corner spawns
-  addBox(sx*22,sz*30,1,5,0.8,matB);
-});
-addBox(0,24,6,1,0.8,matB); addBox(0,-24,6,1,0.8,matB);          // cover in front of the edge spawns
-addBox(24,0,1,6,0.8,matB); addBox(-24,0,1,6,0.8,matB);
-scene.updateMatrixWorld(true);
-
-/* Circle-vs-box push-out. Boxes the entity stands (almost) on top of are skipped. */
+/* Circle-vs-solid push-out. Solids the entity stands (almost) on top of, or walks under, are skipped. */
 function resolve(p,r,footY){
   for(var i=0;i<boxes.length;i++){
     var b=boxes[i];
-    if(footY>=b.h-0.3) continue;
+    if(footY+1.75<=b.y0) continue;
     var cx=Math.max(b.minX,Math.min(p.x,b.maxX)), cz=Math.max(b.minZ,Math.min(p.z,b.maxZ));
+    if(footY>=topAt(b,cx,cz)-0.34) continue;
     var dx=p.x-cx, dz=p.z-cz, d2=dx*dx+dz*dz;
     if(d2<r*r){
       if(d2>1e-8){ var d=Math.sqrt(d2), k=(r-d)/d; p.x+=dx*k; p.z+=dz*k; }
       else{
-        var l=p.x-b.minX, rr=b.maxX-p.x, t=p.z-b.minZ, bt=b.maxZ-p.z, m=Math.min(l,rr,t,bt);
-        if(m===l) p.x=b.minX-r; else if(m===rr) p.x=b.maxX+r; else if(m===t) p.z=b.minZ-r; else p.z=b.maxZ+r;
+        var l=p.x-b.minX, rr=b.maxX-p.x, t=p.z-b.minZ, bt=b.maxZ-p.z, mm=Math.min(l,rr,t,bt);
+        if(mm===l) p.x=b.minX-r; else if(mm===rr) p.x=b.maxX+r; else if(mm===t) p.z=b.minZ-r; else p.z=b.maxZ+r;
       }
     }
   }
-  var L=ARENA-r;
-  p.x=clamp(p.x,-L,L); p.z=clamp(p.z,-L,L);
+  p.x=clamp(p.x,BX0+r,BX1-r); p.z=clamp(p.z,BZ0+r,BZ1-r);
 }
-function groundAt(x,z,footY){
-  var g=0;
+// highest surface under (x,z) that a body whose feet are at footY can step onto (reach = max step up)
+function groundAt(x,z,footY,reach){
+  var g=0, lim=footY+(reach||0.34);
   for(var i=0;i<boxes.length;i++){
     var b=boxes[i];
-    if(b.h<=1&&x>b.minX&&x<b.maxX&&z>b.minZ&&z<b.maxZ&&footY>=b.h-0.3) g=Math.max(g,b.h);
+    if(x>b.minX&&x<b.maxX&&z>b.minZ&&z<b.maxZ){
+      var t=topAt(b,x,z);
+      if(t<=lim&&t>g) g=t;
+    }
   }
   return g;
 }
+
+/* Bot navigation: a 1 m grid with up to 3 walkable surfaces per cell (ground, upper floors, roofs).
+   Neighbouring cells connect when the surface heights differ by a step, so ramps link the floors. */
+var NAV=null, navList=[], navUpper=[];
+var NAV_K=3, NAV_STEP=0.36;
+function navWalkable(h,x,z){
+  var o=[[0,0],[0.45,0],[-0.45,0],[0,0.45],[0,-0.45]];
+  for(var q=0;q<5;q++){
+    var px=x+o[q][0], pz=z+o[q][1];
+    for(var i=0;i<boxes.length;i++){
+      var b=boxes[i];
+      if(px<b.minX||px>b.maxX||pz<b.minZ||pz>b.maxZ) continue;
+      if(topAt(b,px,pz)>h+0.35&&b.y0<h+1.75) return false;
+    }
+  }
+  return true;
+}
+function buildNav(){
+  var nx=Math.ceil(BX1-BX0), nz=Math.ceil(BZ1-BZ0), N=nx*nz*NAV_K;
+  var H=new Float32Array(N); H.fill(NaN);
+  for(var j=0;j<nz;j++) for(var i=0;i<nx;i++){
+    var x=BX0+i+0.5, z=BZ0+j+0.5, cand=[0];
+    for(var q=0;q<boxes.length;q++){
+      var b=boxes[q];
+      if(x>b.minX&&x<b.maxX&&z>b.minZ&&z<b.maxZ){var t=topAt(b,x,z); if(t<8) cand.push(t)}
+    }
+    cand.sort(function(a,b){return a-b});
+    // a surface with another one just above it (a ramp over the ground) is the under-side: drop it
+    cand=cand.filter(function(v,ix){return !(ix+1<cand.length&&cand[ix+1]-v>0.001&&cand[ix+1]-v<=NAV_STEP)});
+    var k=0, last=-9;
+    for(var c=0;c<cand.length&&k<NAV_K;c++){
+      if(cand[c]-last<0.1) continue;
+      last=cand[c];
+      if(navWalkable(cand[c],x,z)) H[(j*nx+i)*NAV_K+k++]=cand[c];
+    }
+  }
+  NAV={nx:nx,nz:nz,H:H,gs:new Float32Array(N),cf:new Int32Array(N),st:new Int32Array(N),stamp:0};
+  navList=[]; navUpper=[];
+  var s0=SPAWNS[0], start=s0?navNode(s0[0],s0[1],s0[2]):-1;
+  if(start<0) return;
+  // flood fill from the first spawn: only reachable surfaces are valid bot destinations
+  var seen=new Uint8Array(N), stack=[start]; seen[start]=1;
+  while(stack.length){
+    var n=stack.pop(); navList.push(n); if(NAV.H[n]>1.5) navUpper.push(n);
+    navNeighbors(n,function(m2){ if(!seen[m2]){seen[m2]=1;stack.push(m2)} });
+  }
+}
+function navNode(x,z,y){
+  if(!NAV) return -1;
+  var ci=Math.floor(x-BX0), cj=Math.floor(z-BZ0), best=-1, bd=1e9;
+  for(var r=0;r<=3&&best<0;r++){
+    for(var dj=-r;dj<=r;dj++) for(var di=-r;di<=r;di++){
+      if(Math.max(Math.abs(di),Math.abs(dj))!==r) continue;
+      var i=ci+di, j=cj+dj; if(i<0||j<0||i>=NAV.nx||j>=NAV.nz) continue;
+      for(var k=0;k<NAV_K;k++){
+        var h=NAV.H[(j*NAV.nx+i)*NAV_K+k]; if(h!==h) continue;
+        var d=Math.abs(h-y)+r*0.5; if(d<bd){bd=d;best=(j*NAV.nx+i)*NAV_K+k}
+      }
+    }
+  }
+  return best;
+}
+function navStep(i,j,h){ // surface index of cell (i,j) reachable from height h, or -1
+  if(i<0||j<0||i>=NAV.nx||j>=NAV.nz) return -1;
+  var best=-1, bd=1e9;
+  for(var k=0;k<NAV_K;k++){
+    var v=NAV.H[(j*NAV.nx+i)*NAV_K+k]; if(v!==v) continue;
+    var d=Math.abs(v-h); if(d<=NAV_STEP&&d<bd){bd=d;best=k}
+  }
+  return best;
+}
+function navNeighbors(n,cb){
+  var cell=(n/NAV_K)|0, i=cell%NAV.nx, j=(cell/NAV.nx)|0, h=NAV.H[n];
+  for(var dz=-1;dz<=1;dz++) for(var dx=-1;dx<=1;dx++){
+    if(!dx&&!dz) continue;
+    var k=navStep(i+dx,j+dz,h); if(k<0) continue;
+    if(dx&&dz&&(navStep(i+dx,j,h)<0||navStep(i,j+dz,h)<0)) continue;
+    cb(((j+dz)*NAV.nx+(i+dx))*NAV_K+k,(dx&&dz)?1.4142:1);
+  }
+}
+function navPos(n){var cell=(n/NAV_K)|0; return [BX0+(cell%NAV.nx)+0.5,BZ0+((cell/NAV.nx)|0)+0.5]}
+function navPath(from,to){
+  if(!NAV||from<0||to<0) return null;
+  var A=NAV, st=++A.stamp, gs=A.gs, cf=A.cf, seen=A.st;
+  var tp=navPos(to), hf=[], hn=[];
+  function push(f,n){var i=hf.length; hf.push(f); hn.push(n); while(i>0){var p=(i-1)>>1; if(hf[p]<=hf[i]) break; var a=hf[p];hf[p]=hf[i];hf[i]=a; a=hn[p];hn[p]=hn[i];hn[i]=a; i=p}}
+  function pop(){
+    var n=hn[0], lf=hf.pop(), ln=hn.pop();
+    if(hf.length){hf[0]=lf;hn[0]=ln; var i=0; for(;;){var l=2*i+1,r=l+1,s=i; if(l<hf.length&&hf[l]<hf[s]) s=l; if(r<hf.length&&hf[r]<hf[s]) s=r; if(s===i) break; var a=hf[s];hf[s]=hf[i];hf[i]=a; a=hn[s];hn[s]=hn[i];hn[i]=a; i=s}}
+    return n;
+  }
+  function hh(n){var p=navPos(n),dx=Math.abs(p[0]-tp[0]),dz=Math.abs(p[1]-tp[1]); return Math.max(dx,dz)+0.4142*Math.min(dx,dz)}
+  gs[from]=0; seen[from]=st; cf[from]=-1; push(hh(from),from);
+  var iter=0, found=false;
+  while(hf.length&&iter++<40000){
+    var n=pop();
+    if(n===to){found=true;break}
+    var gn=gs[n];
+    navNeighbors(n,function(m2,c){
+      var g2=gn+c;
+      if(seen[m2]!==st||g2<gs[m2]){seen[m2]=st;gs[m2]=g2;cf[m2]=n;push(g2+hh(m2),m2)}
+    });
+  }
+  if(!found) return null;
+  var path=[], c=to;
+  while(c>=0&&c!==from){path.push(navPos(c)); c=cf[c]}
+  return path.reverse();
+}
+
+/* ---------- the maps ---------- */
+// themes: bg = sky/fog, fl = floor, A/B/C = obstacle colours, W = walls, K = accent block, P = ramps, R = raised floors
+var TH={
+  steel:{bg:0x141b26,fl:'#202a38',A:0x3b475a,B:0x7a6650,C:0x4a5668,W:0x2a3446,K:0xff6a3d,P:0x6c7a92,R:0x566178},
+  rust:{bg:0x2a1a16,fl:'#3a2a24',A:0x6b4a3c,B:0x8f6b3a,C:0x7a5a4a,W:0x1c120f,K:0xff8a3d,P:0xb08a5a,R:0x7a5a48},
+  port:{bg:0x0f2229,fl:'#1c3340',A:0x2f5f6e,B:0xb0763a,C:0x3f7d8a,W:0x0b1a20,K:0xffb347,P:0x5c8f9c,R:0x4a6f7a},
+  stone:{bg:0x1e1a2b,fl:'#2a2540',A:0x544a73,B:0x8a7aa8,C:0x6a5f8a,W:0x15121f,K:0xff6a8a,P:0x9a8fb8,R:0x6e6490},
+  lab:{bg:0x1b2a30,fl:'#22363d',A:0x4f7480,B:0x9fc4cf,C:0x5f8793,W:0x13202a,K:0x42e0c8,P:0x8fc0cc,R:0x6a93a0},
+  sand:{bg:0x3a3020,fl:'#5a4a32',A:0x8a7650,B:0xb89a62,C:0x9c8860,W:0x2a2216,K:0xd9483b,P:0xc9b27a,R:0xa8945c},
+  night:{bg:0x0a0e1f,fl:'#141a30',A:0x2a3460,B:0x3f4f9a,C:0x34407a,W:0x070a16,K:0x6a8bff,P:0x7080c0,R:0x4a5590},
+  moss:{bg:0x142018,fl:'#1f3326',A:0x3f6a4a,B:0x8a7a42,C:0x4f7a58,W:0x0e1a12,K:0xe0c04a,P:0x7aa07e,R:0x5a8a64},
+  dusk:{bg:0x2a1530,fl:'#3a2142',A:0x7a3f6a,B:0xb86a8a,C:0x8a4a7a,W:0x1a0e20,K:0xffb04a,P:0xc08ab0,R:0x9a5a8a},
+  concrete:{bg:0x1a1c20,fl:'#2c2f36',A:0x5a5f6a,B:0x8a8070,C:0x6a707c,W:0x101216,K:0xff6a3d,P:0x9a9faa,R:0x74798a}
+};
+
+// 1. classic square (the original arena)
+(function(){
+  var m=MB('classic','아레나 제로','□','1층','균형 잡힌 기본 맵. 중앙 요새와 ㄱ자 벙커, 낮은 엄폐물.',[-36,36,-36,36],TH.steel);
+  m.box(0,0,5,5,4.5,'K');
+  m.box(0,9,14,1.2,0.8,'B'); m.box(0,-9,14,1.2,0.8,'B'); m.box(9,0,1.2,14,0.8,'B'); m.box(-9,0,1.2,14,0.8,'B');
+  sym4(function(sx,sz){
+    m.box(sx*20,sz*14,3,8,4,'A'); m.box(sx*14,sz*20,8,3,4,'A'); m.box(sx*10,sz*10,3,3,0.8,'B');
+    m.box(sx*26,sz*8,2,2,3,'C'); m.box(sx*8,sz*26,2,2,3,'C');
+    m.box(sx*30,sz*22,5,1,0.8,'B'); m.box(sx*22,sz*30,1,5,0.8,'B');
+  });
+  m.box(0,24,6,1,0.8,'B'); m.box(0,-24,6,1,0.8,'B'); m.box(24,0,1,6,0.8,'B'); m.box(-24,0,1,6,0.8,'B');
+  [[-30,-30],[30,-30],[-30,30],[30,30],[0,-31],[0,31],[-31,0],[31,0]].forEach(function(s){m.sp(s[0],s[1],0,0)});
+})();
+
+// 2. ㄱ  a bent alley, one floor, lots of corners
+(function(){
+  var m=MB('giyeok','ㄱ자 골목','ㄱ','1층','위쪽과 오른쪽으로 꺾이는 좁은 골목. 모퉁이마다 기습이 기다립니다.',[-40,40,-40,40],TH.rust);
+  m.fill(-40,-14,14,40);
+  // top bar (z -40..-14)
+  m.box(-30,-31,5,3,1.4,'B'); m.box(-30,-20,2,2,3.2,'C'); m.box(-20,-27,3,10,3.4,'A');
+  m.box(-10,-34,3,3,1.4,'B'); m.box(-10,-19,3,3,1.4,'B'); m.box(-5,-26.5,4,4,0.9,'B');
+  m.box(2,-27,3,10,3.4,'A'); m.box(8,-36,4,2,1.4,'B'); m.box(8,-17,4,2,1.4,'B');
+  // the corner
+  m.box(27,-27,6,6,4,'K'); m.box(27,-20,10,0.8,1.4,'B'); m.box(27,-34,10,0.8,1.4,'B');
+  m.box(20,-37,3,3,1.4,'B'); m.box(36,-19,3,3,1.4,'B'); m.box(18,-20,2,2,3.2,'C');
+  // right bar (x 14..40)
+  m.box(22,-6,3,3,1.4,'B'); m.box(34,-4,2,2,3.2,'C'); m.box(27,6,10,2,3.4,'A');
+  m.box(19,16,3,3,1.4,'B'); m.box(35,18,3,3,1.4,'B'); m.box(27,24,3,10,3.4,'A');
+  m.box(21,31,4,2,1.4,'B'); m.box(33,31,4,2,1.4,'B'); m.box(27,36.5,2,2,3.2,'C');
+  m.sp(-37,-35,0,-27).sp(-37,-19,0,-27).sp(-24,-16,0,-27).sp(36,-37,0,-27);
+  m.sp(18,37,27,0).sp(36,37,27,0).sp(17,6,27,0).sp(36,10,27,0);
+})();
+
+// 3. ㄴ  harbour, gantry walkway on the 2nd floor
+(function(){
+  var m=MB('nieun','ㄴ자 항구','ㄴ','1~2층','컨테이너 부두와 2층 통로. 경사로로 올라가 위에서 내려다보세요.',[-40,40,-40,40],TH.port);
+  m.fill(-14,-40,40,14);
+  m.slab(-40,14,10,20,4,'R');
+  m.ramp(-40,0,-34,14,'+z',0,4);
+  m.ramp(10,14,23.4,20,'+x',4,0);
+  [-24,-8,6].forEach(function(x){m.box(x,17,1.4,1.4,3.7,'C')});
+  m.rail(-33.5,19.6,10,20,4); m.rail(-33.5,14,10,14.4,4);
+  m.box(-30,-34,4,3,1.4,'B'); m.box(-20,-30,2,2,3.2,'C'); m.box(-34,-20,3,6,3.4,'A');
+  m.box(-22,-14,6,2.5,2.4,'A'); m.box(-26.5,-14,1.6,1.6,1.2,'B'); m.box(-22,-3,5,3,1.4,'B');
+  m.box(-30,-6,2,2,3.2,'C'); m.box(-18,6,3,3,1.4,'B');
+  m.box(0,30,10,3,2.4,'A'); m.box(-4.4,34,1.6,1.6,1.2,'B'); m.box(20,26,3,12,3.4,'A');
+  m.box(30,36,4,4,1.4,'B'); m.box(12,37,3,3,1.4,'B'); m.box(-20,30,3,3,1.4,'B'); m.box(-32,34,6,2.5,2.4,'A');
+  m.box(32,22,2,2,3.2,'C'); m.box(8,24,2.4,2.4,1.4,'B');
+  m.sp(-36,-37,-27,0).sp(-18,-37,-27,0).sp(-20,-24,-27,0);
+  m.sp(37,36,0,27).sp(36,24,0,27).sp(-10,37,0,27).sp(-36,26,0,27).sp(-36,-10,-27,0);
+})();
+
+// 4. ㄷ  fortress: a raised courtyard inside a U of corridors
+(function(){
+  var m=MB('digeut','ㄷ자 요새','ㄷ','1~2층','가운데가 높은 마당인 U자 맵. 복도에서 경사로로 올라 마당을 차지하세요.',[-40,40,-40,40],TH.stone);
+  m.rect(-14,-14,40,14,3,'R',0);
+  m.ramp(0,-24,6,-14,'+z',0,3); m.ramp(20,14,26,24,'-z',0,3); m.ramp(-24,-3,-14,3,'+x',0,3);
+  // rails around the courtyard, open where the ramps arrive
+  m.rail(-14,-14,-1,-13.6,3); m.rail(7,-14,40,-13.6,3);
+  m.rail(-14,13.6,19,14,3); m.rail(27,13.6,40,14,3);
+  m.rail(-14,-14,-13.6,-3.6,3); m.rail(-14,3.6,-13.6,14,3);
+  // courtyard cover
+  m.rect(7,-3,13,3,3+3,'K',3); m.rect(21,-9.5,24,-6.5,3+1.4,'B',3); m.rect(21,6.5,24,9.5,3+1.4,'B',3);
+  m.rect(31,-6,33,6,3+3.2,'A',3); m.rect(-6,-9,-3,-6,3+1.4,'B',3); m.rect(-6,6,-3,9,3+1.4,'B',3);
+  // corridors
+  m.box(-30,-30,4,3,1.4,'B'); m.box(-5,-30,2,2,3.2,'C'); m.box(18,-30,4,3,1.4,'B'); m.box(30,-22,3,3,1.4,'B');
+  m.box(35,-34,2,2,3.2,'C'); m.box(-22,-20,3,8,3.4,'A'); m.box(12,-36,3,3,1.4,'B');
+  m.box(-34,-8,3,6,3.4,'A'); m.box(-30,8,4,3,1.4,'B'); m.box(-24,22,3,8,3.4,'A'); m.box(-34,-18,2,2,3.2,'C');
+  m.box(-30,30,4,3,1.4,'B'); m.box(-5,30,2,2,3.2,'C'); m.box(12,28,3,3,1.4,'B'); m.box(30,22,3,3,1.4,'B');
+  m.box(35,34,2,2,3.2,'C'); m.box(14,36,3,6,1.4,'B'); m.box(-34,16,2,2,3.2,'C');
+  m.sp(37,-37,0,-27).sp(37,-24,0,-27).sp(37,37,0,27).sp(37,24,0,27);
+  m.sp(-37,0,-27,0).sp(-37,-37,-27,0).sp(-37,37,-27,0).sp(-12,-37,0,-27);
+})();
+
+// 5. ㅁ  a ring around a raised station
+(function(){
+  var m=MB('mieum','ㅁ자 링 스테이션','ㅁ','1~2층','가운데 건물 둘레를 도는 순환 복도. 네 방향 경사로로 지붕에 오를 수 있어요.',[-42,42,-42,42],TH.lab);
+  m.rect(-24,-24,24,24,4,'R',0);
+  m.ramp(-6,-37.4,0,-24,'+z',0,4); m.ramp(0,24,6,37.4,'-z',0,4);
+  m.ramp(-37.4,0,-24,6,'+x',0,4); m.ramp(24,-6,37.4,0,'-x',0,4);
+  m.rail(-24,-24,-6.4,-23.6,4); m.rail(0.4,-24,24,-23.6,4);
+  m.rail(-24,23.6,-0.4,24,4); m.rail(6.4,23.6,24,24,4);
+  m.rail(-24,-24,-23.6,-0.4,4); m.rail(-24,6.4,-23.6,24,4);
+  m.rail(23.6,-24,24,-6.4,4); m.rail(23.6,0.4,24,24,4);
+  m.rect(-4,-4,4,4,4+3,'K',4);
+  [[-14,-14],[14,-14],[-14,14],[14,14]].forEach(function(p){m.rect(p[0]-1.5,p[1]-1.5,p[0]+1.5,p[1]+1.5,4+1.4,'B',4)});
+  m.rect(-16,-1,-12,1,4+1.4,'B',4); m.rect(12,-1,16,1,4+1.4,'B',4);
+  sym4(function(sx,sz){
+    m.box(sx*33,sz*33,6,6,3.4,'A'); m.box(sx*15,sz*33,3,3,1.4,'B'); m.box(sx*33,sz*15,3,3,1.4,'B');
+    m.box(sx*28,sz*28,2,2,3.2,'C'); m.box(sx*20,sz*38,3,2,1.4,'B'); m.box(sx*38,sz*20,2,3,1.4,'B');
+  });
+  m.sp(-38.5,-38.5,0,-38.5).sp(38.5,-38.5,38.5,0).sp(38.5,38.5,0,38.5).sp(-38.5,38.5,-38.5,0);
+  m.sp(-12,-39,0,-39).sp(12,39,0,39).sp(-39,12,-39,0).sp(39,-12,39,0);
+})();
+
+// 6. ㅜ  simple T crossing, long sight lines
+(function(){
+  var m=MB('tee','ㅜ자 교차로','ㅜ','1층','단순한 T자 길. 긴 시야와 몇 개의 엄폐물뿐이라 실력이 그대로 드러나요.',[-44,44,-40,40],TH.sand);
+  m.fill(-44,-12,-10,40); m.fill(10,-12,44,40);
+  [1,-1].forEach(function(sx){
+    m.box(sx*30,-26,4,4,1.4,'B'); m.box(sx*20,-34,2,2,3.2,'C'); m.box(sx*20,-18,2,2,3.2,'C');
+    m.box(sx*12,-26,3,3,0.9,'B'); m.box(sx*39,-26,2,10,3.4,'A');
+  });
+  m.box(0,-20,6,3,1.4,'B'); m.box(0,-34,8,2,0.9,'B');
+  m.box(-5,0,2,2,3.2,'C'); m.box(5,12,2,2,3.2,'C'); m.box(0,22,5,2,1.4,'B'); m.box(-6,30,3,3,1.4,'B'); m.box(6,34,3,3,1.4,'B');
+  m.sp(-41,-37,0,-26).sp(-41,-17,0,-26).sp(41,-37,0,-26).sp(41,-17,0,-26);
+  m.sp(-4,37,0,0).sp(4,37,0,0).sp(0,-14,0,30).sp(-6,16,0,-26);
+})();
+
+// 7. ㅡ  a long hall with catwalks on both sides
+(function(){
+  var m=MB('hall','ㅡ자 브리지 홀','ㅡ','1~2층','길게 뻗은 홀. 양옆 2층 통로와 가운데 다리를 잡으면 시야가 트여요.',[-60,60,-18,18],TH.night);
+  m.slab(-44,-18,44,-10,4,'R'); m.slab(-44,10,44,18,4,'R'); m.slab(-4,-10,4,10,4,'R');
+  m.ramp(44,-18,57.4,-10,'+x',4,0); m.ramp(-57.4,10,-44,18,'+x',0,4);
+  m.rail(-44,-10.4,-4.4,-10,4); m.rail(4.4,-10.4,44,-10,4);
+  m.rail(-44,10,-4.4,10.4,4); m.rail(4.4,10,44,10.4,4);
+  m.rail(-4.4,-10,-4,10,4); m.rail(4,-10,4.4,10,4);
+  [-30,-10,10,30].forEach(function(x){m.box(x,-14,1.5,1.5,3.7,'C'); m.box(x,14,1.5,1.5,3.7,'C')});
+  m.box(-20,0,3,3,1.4,'B'); m.box(20,0,3,3,1.4,'B'); m.box(0,0,6,2,3.4,'A');
+  m.box(-35,0,2,8,3.4,'A'); m.box(35,0,2,8,3.4,'A');
+  [-1,1].forEach(function(sx){m.box(sx*50,-6,3,3,1.4,'B'); m.box(sx*50,5,3,3,1.4,'B'); m.box(sx*52,0,2,2,3.2,'C')});
+  m.sp(-57,-12,0,0).sp(-57,0,0,0).sp(-50,-14,0,0).sp(-47,-4,0,0);
+  m.sp(57,12,0,0).sp(57,0,0,0).sp(50,14,0,0).sp(47,4,0,0);
+})();
+
+// 8. cross plaza with a raised tower in the middle
+(function(){
+  var m=MB('cross','십자 광장','✚','1~2층','네 갈래 길이 만나는 십자 광장. 중앙 2층 탑이 핵심 거점입니다.',[-44,44,-44,44],TH.moss);
+  m.fill(12,12,44,44); m.fill(-44,12,-12,44); m.fill(12,-44,44,-12); m.fill(-44,-44,-12,-12);
+  m.slab(-6,-6,6,6,4,'R');
+  [[-5.2,-5.2],[5.2,-5.2],[-5.2,5.2],[5.2,5.2]].forEach(function(p){m.box(p[0],p[1],1.6,1.6,3.7,'C')});
+  m.ramp(6,-3,19.4,3,'-x',0,4); m.ramp(-19.4,-3,-6,3,'+x',0,4);
+  m.rail(-6,-6,6,-5.6,4); m.rail(-6,5.6,6,6,4);
+  m.rail(5.6,-6,6,-3.4,4); m.rail(5.6,3.4,6,6,4); m.rail(-6,-6,-5.6,-3.4,4); m.rail(-6,3.4,-5.6,6,4);
+  function rb(x,z,w,d,h,mat){ // one block, copied to all four arms
+    m.box(x,z,w,d,h,mat); m.box(-z,x,d,w,h,mat); m.box(-x,-z,w,d,h,mat); m.box(z,-x,d,w,h,mat);
+  }
+  rb(-7,-26,3,3,1.4,'B'); rb(7,-34,3,3,1.4,'B'); rb(0,-40,2,2,3.2,'C'); rb(-9,-17,2,2,3.2,'C');
+  rb(8,-22,2,6,3.4,'A'); rb(-6,-36,4,2,0.9,'B');
+  m.sp(0,-37,0,0).sp(0,37,0,0).sp(37,0,0,0).sp(-37,0,0,0);
+  m.sp(-8,-40,0,0).sp(8,40,0,0).sp(40,-8,0,0).sp(-40,8,0,0);
+})();
+
+// 9. ㄹ  a serpentine road with gates
+(function(){
+  var m=MB('rieul','ㄹ자 미로 도로','ㄹ','1층','ㄹ자로 굽이치는 긴 길. 문처럼 생긴 벽 틈을 지나며 한 구역씩 밀고 나가요.',[-48,48,-40,40],TH.dusk);
+  m.fill(-48,-24,32,-8); m.fill(-32,8,48,24);
+  // gates across the three lanes (each with a 5 m door at a different height)
+  m.wall('x',-16,-40,-24,[[-34,-29]],3.4,'A'); m.wall('x',16,-40,-24,[[-31,-26]],3.4,'A');
+  m.wall('x',-16,-8,8,[[-2,3]],3.4,'A'); m.wall('x',16,-8,8,[[2,7]],3.4,'A');
+  m.wall('x',-16,24,40,[[28,33]],3.4,'A'); m.wall('x',16,24,40,[[32,37]],3.4,'A');
+  // connectors
+  m.box(40,-16,3,3,1.4,'B'); m.box(44,-12,2,2,3.2,'C'); m.box(-40,16,3,3,1.4,'B'); m.box(-44,20,2,2,3.2,'C');
+  // lane cover
+  m.box(-38,-30,3,3,1.4,'B'); m.box(-6,-36,3,3,1.4,'B'); m.box(0,-28,2,2,3.2,'C'); m.box(34,-34,4,3,1.4,'B');
+  m.box(-38,2,3,3,1.4,'B'); m.box(-6,-4,3,3,1.4,'B'); m.box(0,4,2,2,3.2,'C'); m.box(38,-3,3,3,1.4,'B');
+  m.box(-6,28,3,3,1.4,'B'); m.box(0,36,2,2,3.2,'C'); m.box(34,30,4,3,1.4,'B'); m.box(-38,36,3,3,1.4,'B');
+  m.sp(-44,-37,0,-32).sp(-44,-28,0,-32).sp(44,37,0,32).sp(44,28,0,32);
+  m.sp(-44,0,0,0).sp(44,0,0,0).sp(-24,-37,0,-32).sp(24,37,0,32);
+})();
+
+// 10. compound: rooms, doors, and a mezzanine reached by stairs
+(function(){
+  var m=MB('compound','복합 단지','田','1~2층','문으로 이어진 아홉 개의 방과 2층 발코니. 복잡한 실내전을 즐기세요.',[-40,40,-40,40],TH.concrete);
+  var h=4.5;
+  m.wall('x',-13.5,-40,40,[[-30.5,-25.5],[-2.5,2.5],[27.5,32.5]],h,'A');
+  m.wall('x',13.5,-40,40,[[-24.5,-19.5],[-6.5,-1.5],[23.5,28.5]],h,'A');
+  m.wall('z',-13.5,-40,40,[[-32.5,-27.5],[-4.5,0.5],[24.5,29.5]],h,'A');
+  m.wall('z',13.5,-40,40,[[-28.5,-23.5],[3.5,8.5],[30.5,35.5]],h,'A');
+  // north hall: mezzanine on its far half
+  m.slab(-13,-40,13,-29,3.6,'R'); m.ramp(-12.5,-29,-7,-15.5,'-z',0,3.6);
+  m.rail(-6.5,-29,13,-28.6,3.6);
+  // south hall
+  m.slab(-13,29,13,40,3.6,'R'); m.ramp(7,15.5,12.5,29,'+z',0,3.6);
+  m.rail(-13,28.6,6.5,29,3.6);
+  // centre room
+  m.box(0,0,4,4,3.4,'K'); m.box(-8,-7,2,2,3.2,'C'); m.box(8,7,2,2,3.2,'C'); m.box(7,-8,3,3,1.4,'B'); m.box(-7,8,3,3,1.4,'B');
+  // corner rooms
+  sym4(function(sx,sz){
+    m.box(sx*27,sz*27,3,3,1.4,'B'); m.box(sx*34,sz*20,2,2,3.2,'C'); m.box(sx*20,sz*34,2,2,3.2,'C');
+    m.box(sx*22,sz*22,5,1.5,2.4,'A');
+  });
+  // side rooms
+  m.box(-27,0,4,6,1.4,'B'); m.box(27,0,4,6,1.4,'B'); m.box(-34,6,2,2,3.2,'C'); m.box(34,-6,2,2,3.2,'C');
+  // hall floors
+  m.box(0,-20,3,3,1.4,'B'); m.box(0,20,3,3,1.4,'B');
+  m.sp(-37,-37,0,0).sp(37,-37,0,0).sp(-37,37,0,0).sp(37,37,0,0);
+  m.sp(-27,6,0,0).sp(27,-6,0,0).sp(0,-18,0,0).sp(0,18,0,0);
+})();
 
 /* ---------- weapons ---------- */
 // slot 0 = sidearm, 1 = melee, 2 = primary. dmg is per hit (per pellet for shotguns), head = head multiplier.
@@ -785,6 +1170,12 @@ function makeBot(i){
   return bot;
 }
 for(var bi=0;bi<BOT_COUNT;bi++) bots.push(makeBot(bi));
+(function(){
+  var id='classic';
+  try{id=localStorage.getItem('azero-map')||id}catch(e){}
+  try{var q=/[?&]map=([a-z]+)/.exec(location.search); if(q) id=q[1]}catch(e){}
+  loadMap(id);
+})();
 
 function pickSpawn(avoid){
   var best=SPAWNS[0], bestD=-1;
@@ -800,20 +1191,20 @@ function spawnBot(b){
   var avoid=[];
   if(player.alive) avoid.push(player.pos);
   var p=pickSpawn(avoid);
-  b.pos.set(p[0],0,p[1]);
-  b.yaw=Math.atan2(p[0],p[1]);
+  b.pos.set(p[0],p[2]||0,p[1]);
+  b.yaw=p[3];
   b.group.rotation.y=b.yaw;
-  b.hp=100; b.alive=true; b.target=null; b.flash=0; b.los=false; b.stuck=0; b.shots=0; b.rlT=0;
+  b.hp=100; b.alive=true; b.target=null; b.path=null; b.pi=0; b.repT=0; b.flash=0; b.los=false; b.stuck=0; b.shots=0; b.rlT=0;
   b.group.visible=true; spawnFX(FXM,p[0],p[1]);
 }
-function spawnPlayer(sx,sz,syaw){
+function spawnPlayer(sx,sz,syaw,sy){
   if(sx===undefined){
     var avoid=[];
     bots.forEach(function(b){if(b.alive) avoid.push(b.pos)});
     var p=pickSpawn(avoid);
-    sx=p[0]; sz=p[1]; syaw=Math.atan2(sx,sz);
+    sx=p[0]; sz=p[1]; syaw=p[3]; sy=p[2];
   }
-  player.pos.set(sx,EYE,sz);
+  player.pos.set(sx,EYE+(sy||0),sz);
   player.vel.set(0,0,0);
   player.yaw=syaw;
   player.pitch=0; player.roll=0;
@@ -963,6 +1354,49 @@ function myName(){
 }
 function saveName(){ try{localStorage.setItem('azero-name',nameEl.value.trim().slice(0,12))}catch(e){} }
 try{ nameEl.value=localStorage.getItem('azero-name')||''; }catch(e){}
+
+/* ---------- map picker ---------- */
+var mpGrid=$('mp-grid'), mpInfo=$('mp-info'), mpCards={};
+function drawMapThumb(cv,m){
+  var g=cv.getContext('2d'); if(!g) return;
+  var W=cv.width, H=cv.height, bw=m.b[1]-m.b[0], bd=m.b[3]-m.b[2], sc=Math.min((W-6)/bw,(H-6)/bd);
+  var ox=(W-bw*sc)/2-m.b[0]*sc, oy=(H-bd*sc)/2-m.b[2]*sc;
+  g.clearRect(0,0,W,H);
+  g.fillStyle='#2e3a4e'; g.fillRect(ox+m.b[0]*sc,oy+m.b[2]*sc,bw*sc,bd*sc);
+  var list=m.solids.slice().sort(function(a,b){return a.y1-b.y1});
+  list.forEach(function(s){
+    var c;
+    if(s.mat==='W') c='#090c12';
+    else if(s.ramp) c='#ffd08a';
+    else if(s.y0>0.5&&s.y1-s.y0<=0.4) c='#ff9a63';
+    else if(s.y0>0.5) c='#e8e1d0';
+    else if(s.y1>=3.9) c='#ff9a63';
+    else if(s.y1>=2.6) c='#8795b0';
+    else c='#5a6882';
+    g.fillStyle=c; g.fillRect(ox+s.minX*sc,oy+s.minZ*sc,Math.max(1,(s.maxX-s.minX)*sc),Math.max(1,(s.maxZ-s.minZ)*sc));
+  });
+  g.fillStyle='#6ee7a0';
+  m.spawns.forEach(function(p){g.fillRect(ox+p[0]*sc-1,oy+p[1]*sc-1,2,2)});
+}
+MAPS.forEach(function(m){
+  var b=document.createElement('button'); b.type='button'; b.className='mp-card'; b.setAttribute('data-map',m.id); b.title=m.name;
+  var cv=document.createElement('canvas'); cv.width=98; cv.height=70; b.appendChild(cv);
+  var l=document.createElement('b'); l.textContent=m.shape; b.appendChild(l);
+  drawMapThumb(cv,m);
+  b.addEventListener('click',function(){ if(online&&!isHost) return; loadMap(m.id); blip(640,0.03,0.03,'square') });
+  mpGrid.appendChild(b); mpCards[m.id]=b;
+});
+function mapPickRefresh(){
+  if(!curMap||!mpInfo) return;
+  for(var id in mpCards) mpCards[id].classList.toggle('on',id===curMap.id);
+  mpInfo.innerHTML='';
+  var t=document.createElement('strong'); t.textContent=curMap.name;
+  var tg=document.createElement('i'); tg.textContent=curMap.floors; t.appendChild(tg);
+  var d=document.createElement('span'); d.textContent=curMap.desc;
+  mpInfo.appendChild(t); mpInfo.appendChild(d);
+  var mn=$('map-now'); if(mn) mn.textContent='맵 · '+curMap.name+' ('+curMap.floors+')';
+}
+mapPickRefresh();
 
 function beginGame(){
   online=false; ended=false; running=true; paused=false; gt=0;
@@ -1195,19 +1629,30 @@ function damagePlayer(amt,src){
 /* ---------- bot AI ---------- */
 var losRay=new T.Raycaster(), losA=new T.Vector3(), losB=new T.Vector3();
 function hasLOS(b){
-  losA.set(b.pos.x,1.5,b.pos.z);
+  losA.set(b.pos.x,b.pos.y+1.5,b.pos.z);
   losB.copy(player.pos).sub(losA);
   var d=losB.length(); losB.normalize();
   losRay.set(losA,losB); losRay.far=d;
   return losRay.intersectObjects(solidMeshes,false).length===0;
 }
-function pickTarget(b){
-  var hunt=player.alive&&Math.random()<0.45, lim=ARENA-4;
-  if(hunt) b.target={x:clamp(player.pos.x+(Math.random()-.5)*14,-lim,lim),z:clamp(player.pos.z+(Math.random()-.5)*14,-lim,lim)};
-  else b.target={x:(Math.random()*2-1)*lim,z:(Math.random()*2-1)*lim};
+function planPath(b){
+  var from=navNode(b.pos.x,b.pos.z,b.pos.y), to=-1;
+  b.path=null; b.pi=0; b.repT=8;
+  if(from<0||!navList.length) return;
+  var hunt=player.alive&&Math.random()<0.45;
+  if(hunt){
+    to=navNode(player.pos.x+(Math.random()-.5)*8,player.pos.z+(Math.random()-.5)*8,player.pos.y-EYE);
+    b.repT=2.5;
+  }
+  for(var tries=0;tries<4;tries++){
+    if(to<0||to===from) to=(navUpper.length&&Math.random()<0.4)?navUpper[(Math.random()*navUpper.length)|0]:navList[(Math.random()*navList.length)|0];
+    var path=navPath(from,to);
+    if(path&&path.length){b.path=path; b.target={x:path[path.length-1][0],z:path[path.length-1][1]}; return}
+    to=-1;
+  }
 }
 function botShoot(b,dist){
-  var from=new T.Vector3(b.pos.x-Math.sin(b.yaw)*0.5,1.25,b.pos.z-Math.cos(b.yaw)*0.5);
+  var from=new T.Vector3(b.pos.x-Math.sin(b.yaw)*0.5,b.pos.y+1.25,b.pos.z-Math.cos(b.yaw)*0.5);
   var to=player.pos.clone(); to.y-=0.3;
   var hit=player.invuln<=0&&Math.random()<clamp(0.8-dist*0.018,0.2,0.7);
   if(!hit){to.x+=(Math.random()-.5)*2.5;to.y+=(Math.random()-.5)*1.5;to.z+=(Math.random()-.5)*2.5}
@@ -1239,10 +1684,15 @@ function updateBot(b,dt){
     if(b.fireCd<=0&&b.rlT<=0){b.fireCd=0.55+Math.random()*0.7;botShoot(b,dist)}
     b.target=null;
   }else{
-    if(!b.target||Math.hypot(b.target.x-b.pos.x,b.target.z-b.pos.z)<1.5||b.stuck>0.6){pickTarget(b);b.stuck=0}
-    var tx=b.target.x-b.pos.x, tz=b.target.z-b.pos.z, td=Math.hypot(tx,tz)||1;
-    mx=tx/td; mz=tz/td; speed=2.6;
-    faceYaw=Math.atan2(-mx,-mz);
+    b.repT-=dt;
+    if(!b.path||b.pi>=b.path.length||b.stuck>0.6||b.repT<=0){planPath(b);b.stuck=0}
+    var wp=b.path&&b.path[b.pi];
+    if(wp){
+      var tx=wp[0]-b.pos.x, tz=wp[1]-b.pos.z, td=Math.hypot(tx,tz);
+      if(td<0.7) b.pi++;
+      mx=tx/(td||1); mz=tz/(td||1); speed=2.6;
+      faceYaw=Math.atan2(-mx,-mz);
+    }
   }
   var ml=Math.hypot(mx,mz);
   if(ml>0.001){mx/=ml;mz/=ml}
@@ -1254,7 +1704,10 @@ function updateBot(b,dt){
     var ox=b.pos.x-o.pos.x, oz=b.pos.z-o.pos.z, od=Math.hypot(ox,oz);
     if(od<1.0&&od>0.001){b.pos.x+=ox/od*(1.0-od)*0.5;b.pos.z+=oz/od*(1.0-od)*0.5}
   }
-  resolve(b.pos,0.5,0);
+  resolve(b.pos,0.5,b.pos.y);
+  var bg=groundAt(b.pos.x,b.pos.z,b.pos.y,0.45);
+  if(bg<b.pos.y-0.5){b.pos.x=px;b.pos.z=pz;b.strafe*=-1;b.stuck+=dt*2}   // never walk off a ledge
+  else b.pos.y=bg;
   var moved=Math.hypot(b.pos.x-px,b.pos.z-pz);
   if(speed>0&&moved<speed*dt*0.3) b.stuck+=dt; else b.stuck=Math.max(0,b.stuck-dt);
   if(b.stuck>0.6&&b.los){b.strafe*=-1;b.stuck=0}
@@ -1309,8 +1762,16 @@ function updatePlayer(dt){
   if(!player.onGround) player.vel.y-=20*dt;
   player.pos.x+=player.vel.x*dt; player.pos.z+=player.vel.z*dt; player.pos.y+=player.vel.y*dt;
 
-  var foot=player.pos.y-EYE, g=groundAt(player.pos.x,player.pos.z,foot);
+  if(player.vel.y>0){   // bump the head on the underside of raised floors
+    var hd=player.pos.y+0.2, ph=hd-player.vel.y*dt;
+    for(var ci=0;ci<boxes.length;ci++){
+      var cb=boxes[ci];
+      if(cb.y0>0.5&&!cb.ramp&&player.pos.x>cb.minX&&player.pos.x<cb.maxX&&player.pos.z>cb.minZ&&player.pos.z<cb.maxZ&&ph<=cb.y0+0.02&&hd>cb.y0){player.pos.y=cb.y0-0.2;player.vel.y=0;break}
+    }
+  }
+  var foot=player.pos.y-EYE, g=groundAt(player.pos.x,player.pos.z,foot,0.34+Math.max(0,-player.vel.y*dt));
   if(foot<=g&&player.vel.y<=0){player.pos.y=g+EYE;player.vel.y=0;player.onGround=true}
+  else if(player.onGround&&player.vel.y<=0&&foot>g&&foot-g<=0.45){player.pos.y=g+EYE}   // walk down ramps without hopping
   else if(foot>g+0.02) player.onGround=false;
   resolve(player.pos,RADIUS,player.pos.y-EYE);
 
@@ -1492,7 +1953,7 @@ function clientHandle(m){
       }
       break;
     case 'spawn':
-      if(m.id===myId){ $('deadmsg').hidden=true; spawnPlayer(m.x,m.z,m.yaw); }
+      if(m.id===myId){ $('deadmsg').hidden=true; spawnPlayer(m.x,m.z,m.yaw,isFinite(+m.y)?clamp(+m.y,0,12):0); }
       break;
     case 'end':
       phase='ended'; firing=false;
@@ -1525,7 +1986,7 @@ function hostSpawn(id){
   for(var k in hostPlayers){var o=hostPlayers[k];if(o.alive&&+k!==id) avoid.push({x:o.x,z:o.z})}
   var sp=pickSpawn(avoid);
   p.hp=100; p.alive=true; p.invuln=2; p.lastHit=-99; p.x=sp[0]; p.z=sp[1];
-  var m={t:'spawn',id:id,x:sp[0],z:sp[1],yaw:Math.atan2(sp[0],sp[1])};
+  var m={t:'spawn',id:id,x:sp[0],z:sp[1],y:sp[2]||0,yaw:sp[3]};
   bcast(m); clientHandle(m);
   sendRoster();
 }
@@ -1675,7 +2136,7 @@ function onIncoming(conn){
       id=nextId++; conns[id]=conn;
       var nm=String(m.name||'Player').slice(0,12);
       hostPlayers[id]=newRec(id,nm); hostPlayers[id].sk=skinArr(cleanSkin(m.sk));
-      conn.send({t:'welcome',id:id,code:roomCode});
+      conn.send({t:'welcome',id:id,code:roomCode,map:curMap.id});
       feed(nm+' 입장');
       sendRoster();
       return;
@@ -1731,6 +2192,7 @@ function joinRoom(code){
       if(m.t==='welcome'&&!welcomed){
         welcomed=true; clearTimeout(timer);
         myId=+m.id; roomCode=String(m.code||code).slice(0,5); isHost=false;
+        if(typeof m.map==='string') loadMap(m.map.slice(0,16));
         enterOnline();
       }else if(m.t==='full'){
         clearTimeout(timer); failConnect('방이 가득 찼습니다. (최대 '+MAX_PLAYERS+'명)');
@@ -1983,8 +2445,8 @@ function aimAssist(dt,def){
     var ang=Math.hypot(ey*Math.cos(player.pitch),ep), cone=clamp(Math.atan2(0.9,dist),0.035,0.13);
     if(ang<cone&&(!best||ang<best.ang)) best={ey:ey,ep:ep,ang:ang,cone:cone,x:x,y:y,z:z};
   }
-  if(online){for(var id in remotes){var r=remotes[id];if(r.alive&&r.group.visible) consider(r.group.position.x,1.2,r.group.position.z)}}
-  else bots.forEach(function(b){if(b.alive) consider(b.pos.x,1.2,b.pos.z)});
+  if(online){for(var id in remotes){var r=remotes[id];if(r.alive&&r.group.visible) consider(r.group.position.x,r.group.position.y+1.2,r.group.position.z)}}
+  else bots.forEach(function(b){if(b.alive) consider(b.pos.x,b.pos.y+1.2,b.pos.z)});
   if(!best) return;
   tmpV.set(best.x-cp.x,best.y-cp.y,best.z-cp.z);
   var d=tmpV.length(); tmpV.normalize();
