@@ -117,6 +117,14 @@ option{background:#0b0f15;color:#e8edf2}
 .slots{display:flex;gap:6px}
 .slots span{min-width:22px;padding:2px 6px;border:1px solid var(--line);border-radius:2px;font-size:12px;font-weight:700;text-align:center;color:var(--muted)}
 .slots span.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+@keyframes pop{0%{transform:scale(1.5)}100%{transform:scale(1)}}
+@keyframes swapIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.slots span.on{animation:pop .25s}
+#ammolabel.swap{animation:swapIn .35s}
+#wtoast{position:absolute;left:50%;bottom:27%;transform:translateX(-50%);font-family:var(--font-display);font-size:22px;font-weight:700;letter-spacing:.12em;text-shadow:0 2px 10px rgba(0,0,0,.75);opacity:0;pointer-events:none;white-space:nowrap}
+#wtoast.on{animation:toast 1s ease-out}
+@keyframes toast{0%{opacity:0;transform:translate(-50%,10px) scale(.9)}15%{opacity:1;transform:translate(-50%,0) scale(1.06)}25%{transform:translate(-50%,0) scale(1)}75%{opacity:1}100%{opacity:0;transform:translate(-50%,-6px)}}
+@media (prefers-reduced-motion:reduce){.slots span.on,#ammolabel.swap,#wtoast.on{animation:none}}
 #scope{position:absolute;inset:0;background:radial-gradient(circle at center,rgba(0,0,0,0) 0,rgba(0,0,0,0) 27vmin,rgba(0,0,0,.95) 27.4vmin)}
 #scope::before,#scope::after{content:"";position:absolute;background:rgba(0,0,0,.8)}
 #scope::before{left:0;right:0;top:50%;height:1px}
@@ -543,7 +551,7 @@ function buildVM(){
   vmGroup=new T.Group();
   vm.parts.forEach(function(p){
     var m=new T.Mesh(new T.BoxGeometry(p[0],p[1],p[2]),new T.MeshLambertMaterial({color:p[6]}));
-    m.position.set(p[3],p[4],p[5]); if(p[7]) m.rotation.set(p[7][0],p[7][1],p[7][2]);
+    m.position.set(p[3],p[4],p[5]); m.userData.bz=p[5]; if(p[7]) m.rotation.set(p[7][0],p[7][1],p[7][2]);
     vmGroup.add(m);
   });
   if(vm.rot) vmGroup.rotation.set(vm.rot[0],vm.rot[1],vm.rot[2]);
@@ -912,7 +920,7 @@ function updateHud(){
   var rl=player.reloading>0;
   $('reloadlabel').hidden=!rl; $('ammolabel').hidden=rl;
   if(hudW!==wdef.id){
-    hudW=wdef.id; $('ammolabel').textContent=wdef.name; $('weapon-btn').textContent=wdef.name; $('scope-btn').hidden=!wdef.zoom;
+    var firstW=hudW===null; hudW=wdef.id; var al=$('ammolabel'); al.classList.remove('swap'); void al.offsetWidth; al.classList.add('swap'); if(!firstW) showWToast(wdef.name); $('ammolabel').textContent=wdef.name; $('weapon-btn').textContent=wdef.name; $('scope-btn').hidden=!wdef.zoom;
   }
   if(hudCur!==player.cur){hudCur=player.cur;for(var si=0;si<slotEls.length;si++) slotEls[si].className=si===player.cur?'on':''}
   $('scope-btn').classList.toggle('on',!!player.zoomToggle);
@@ -1080,11 +1088,14 @@ var ray=new T.Raycaster(); ray.far=120;
 var ndc=new T.Vector2(), tmpV=new T.Vector3();
 var fireLatched=false, fovScale=1, hudW=null, hudCur=-1, slotEls=document.querySelectorAll('#slots span');
 function curDef(){return WEAPONS[player.inv[player.cur].id]}
+function sstep(a,b,x){var t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t)}
+var wtoast=document.createElement('div'); wtoast.id='wtoast'; $('hud').appendChild(wtoast);
+function showWToast(n){wtoast.textContent=n;wtoast.classList.remove('on');void wtoast.offsetWidth;wtoast.classList.add('on')}
 function calcDamage(def,zone,f){return def.dmg*(zone===1?def.head:(zone===2?0.75:1))*clamp(f,0,1)}
 function startReload(){
   var def=curDef();
   if(def.kind!=='gun'||!player.alive||player.reloading>0||player.ammo>=def.mag) return;
-  player.reloading=def.reload; player.zoomToggle=false;
+  player.reloading=def.reload; player.zoomToggle=false; player.rl1=false;
   blip(220,0.08,0.05,'square');
 }
 function collectTargets(){
@@ -1115,7 +1126,7 @@ function applyHit(h,def){
 }
 function fire(def){
   if(player.ammo<=0){startReload();return}
-  player.ammo--; player.lastShot=gt; player.fireCd=def.rate; player.recoil=def.recoil; muzzleT=0.05; muzzle.visible=true;
+  player.ammo--; player.lastShot=gt; player.fireCd=def.rate; player.recoil=def.recoil; muzzleT=0.05; muzzle.visible=true; muzzle.scale.setScalar(0.7+Math.random()*0.8);
   playShot(def.snd[0],def.snd[1]);
   player.heat=clamp(player.heat+def.heat,0,1);
   var moving=Math.hypot(player.vel.x,player.vel.z)>1;
@@ -1310,7 +1321,7 @@ function updatePlayer(dt){
   player.heat=Math.max(0,player.heat-dt*1.2);
   if(player.reloading>0){
     player.reloading-=dt;
-    if(player.reloading<=0){player.reloading=0;player.ammo=def.mag}
+    if(player.reloading<=0){player.reloading=0;player.ammo=def.mag;blip(420,0.04,0.05,'square');blip(300,0.07,0.04,'triangle')}
   }else{
     if(def.kind==='gun'&&player.ammo<=0&&player.equip<=0) startReload();
     var canFire=firing&&player.fireCd<=0&&player.equip<=0&&(locked||fallback||touchUI)&&!(online&&phase==='ended');
@@ -1332,11 +1343,43 @@ function updatePlayer(dt){
   var bob=player.onGround&&hs>0.8?Math.sin(bobT)*0.035:0;
   camera.position.set(player.pos.x,player.pos.y+bob,player.pos.z);
   camera.rotation.set(player.pitch+player.recoil*0.012,player.yaw,0);
-  var sw=(player.swing>0&&def.swingT)?Math.sin(Math.PI*(1-player.swing/def.swingT)):0;
+  var swp=(player.swing>0&&def.swingT)?1-player.swing/def.swingT:0;
+  var e=clamp(player.equip/0.35,0,1); e=e*e;
+  var rl=0, rj=0;
+  if(player.reloading>0){
+    var rp=1-player.reloading/def.reload;
+    rl=sstep(0,0.16,rp)-sstep(0.82,1,rp);
+    rj=Math.exp(-Math.pow((rp-0.5)/0.07,2));
+    if(rp>0.5&&!player.rl1){player.rl1=true;blip(170,0.05,0.05,'square')}
+  }
+  var wx=0.22+(hs>0.8?Math.cos(bobT*0.5)*0.01:0), wy=-0.2+Math.sin(gt*1.7)*0.0025, wz=-0.45, wrx=Math.sin(gt*1.3)*0.004, wrz=0;
+  // draw: rises from below with a roll
+  wy-=e*0.3; wrx-=e*0.8; wrz+=e*0.5;
+  // reload: dip, mag-swap jolt in the middle, snap back
+  wy-=rl*0.09+rj*0.04; wrx-=rl*0.8; wrz+=rl*0.35; wz+=rj*0.03; wx-=rl*0.04;
+  // recoil
+  wz+=player.recoil*0.06; wrx+=player.recoil*(def.id==='revolver'?0.06:0.03);
+  wrz+=Math.sin(gt*47)*player.recoil*0.006;
+  // cycling: shotgun pump / sniper bolt / pistol slide
+  var cyc=(def.kind==='gun'&&player.fireCd>0)?1-player.fireCd/def.rate:1, pump=0, ch=vmGroup?vmGroup.children:[];
+  if((def.id==='shotgun'||def.id==='sniper')&&cyc>0.3&&cyc<0.8) pump=Math.sin(Math.PI*(cyc-0.3)/0.5);
+  if(def.id==='sniper'){wrz+=pump*0.45;wx-=pump*0.03;wz+=pump*0.04}
+  if(def.id==='shotgun'){wz+=pump*0.02;wrx+=pump*0.05; if(ch[3]) ch[3].position.z=ch[3].userData.bz+pump*0.16}
+  if(def.id==='pistol'&&ch[0]) ch[0].position.z=ch[0].userData.bz+clamp(player.recoil/def.recoil,0,1)*0.06;
+  // melee: knife stabs, axe chops
+  if(def.kind==='melee'&&swp>0){
+    var sn=Math.sin(Math.PI*swp);
+    if(def.id==='axe'){
+      var a=swp<0.3?swp/0.3:(swp<0.6?1-(swp-0.3)/0.3*2.1:-1.1*(1-(swp-0.6)/0.4));
+      wrx+=a*0.9; wy+=a>0?a*0.08:a*0.1; wz-=a<0?-a*0.12:0; wrz+=sn*0.25; wx-=sn*0.05;
+    }else{
+      wz-=sn*0.3; wrx+=sn*0.25; wx-=sn*0.08; wrz+=sn*0.5;
+    }
+  }
   weapon.visible=!scoped;
-  weapon.position.set(0.22+(hs>0.8?Math.cos(bobT*0.5)*0.01:0)-sw*0.12,-0.2-Math.min(Math.max(player.equip,0),0.35)*0.6,-0.45+player.recoil*0.06-sw*0.1);
-  weapon.rotation.x=(player.reloading>0?-0.9*Math.sin(Math.PI*(1-player.reloading/def.reload)):0)-sw*1.1;
-  weapon.rotation.z=sw*0.7;
+  weapon.position.set(wx,wy,wz);
+  weapon.rotation.x=wrx;
+  weapon.rotation.z=wrz;
 }
 
 /* ---------- online: WebRTC via PeerJS. The room creator relays messages and referees damage. ---------- */
